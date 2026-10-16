@@ -1,0 +1,19 @@
+{
+  "name": "agent-studio",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": "^22.18.0 || ^24.12.0"
+  },
+  "scripts": {
+    "setup": "node scripts/setup.mjs",
+    "dev": "node scripts/dev.mjs",
+    "build": "node scripts/workspace.mjs build",
+    "typecheck": "node scripts/workspace.mjs typecheck",
+    "test": "node scripts/workspace.mjs test",
+    "db:migrate": "node scripts/server-task.mjs db:migrate",
+    "admin:bootstrap": "node scripts/server-task.mjs admin:bootstrap"
+  },
+  "packageManager": "pnpm@11.16.0"
+}

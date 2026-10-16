@@ -1,0 +1,103 @@
+import 'reflect-metadata';
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import {randomUUID,createHash} from 'node:crypto';
+import {readFile,readdir} from 'node:fs/promises';
+import {Client} from 'pg';
+import {AgentManagementService} from '../dist/agent-management/agent-management.service.js';
+import {SkillRegistry} from '../dist/ai/skills/skill-registry.js';
+import {ToolRegistry} from '../dist/ai/tools/tool-registry.js';
+import {IntegrationService} from '../dist/integrations/integration.service.js';
+
+// All fixtures and migrations live inside a transaction-scoped schema and are rolled back.
+// No production resource, binding, migration history or service process is modified.
+test('PostgreSQL: Skill working draft, optimistic writes, immutable publish, usage and history branch', {skip:process.env.SKILL_INTEGRATION!=='1'},async()=>{
+ const client=new Client({host:process.env.POSTGRES_HOST??'127.0.0.1',port:Number(process.env.POSTGRES_PORT??5433),user:process.env.POSTGRES_USER??'grounded',password:process.env.POSTGRES_PASSWORD,database:process.env.POSTGRES_DB??'agent_studio'});
+ await client.connect();
+ try{
+  const schema='skill_test_'+randomUUID().replaceAll('-','');
+  await client.query('BEGIN');await client.query(`CREATE SCHEMA "${schema}"`);await client.query(`SET LOCAL search_path TO "${schema}", public`);
+  const directory=new URL('../migrations/',import.meta.url);
+  for(const file of (await readdir(directory)).filter(f=>f.endsWith('.sql')).sort())await client.query((await readFile(new URL(file,directory),'utf8')).split('-- Down Migration')[0]);
+  const actor=Number((await client.query("INSERT INTO admins(email,password_hash,display_name) VALUES('skill-fixture@example.invalid','fixture','skill fixture') RETURNING id")).rows[0].id);
+  const query=(sql,values)=>client.query(sql,values);
+  const database={query,transaction:async(work)=>{await client.query('SAVEPOINT skill_operation');try{const result=await work({query});await client.query('RELEASE SAVEPOINT skill_operation');return result;}catch(e){await client.query('ROLLBACK TO SAVEPOINT skill_operation');throw e;}}};
+  const service=new AgentManagementService(database,{},new ToolRegistry(),new SkillRegistry(),{},{});
+  const config={description:'专项异常核实',instructions:'核实来源后回答',allowedTools:[],allowedKnowledgeBaseIds:[],disableModelInvocation:false,resources:[{path:'references/original.md',content:'Original published resource'}]};
+  const created=await service.create(actor,{kind:'skill',key:'legacy_support',name:'专项',config});
+  assert.equal((await service.skillDraft(actor,created.resourceId,{})).versionId,created.versionId);
+  await service.test(actor,created.versionId,{});await service.publish(actor,created.versionId);
+  const draft=await service.skillDraft(actor,created.resourceId,{});assert.equal(draft.reused,false);
+  assert.equal((await service.skillDraft(actor,created.resourceId,{})).versionId,draft.versionId);
+  const source='---\nname: legacy-support # original comment\ndescription: 专项异常核实\nlicense: MIT\nmetadata:\n  author: fixture\n---\n\n修订后的指导\n';
+  const updatedResources=[{path:'references/revised.md',content:'Revised reference'},{path:'scripts/example.py',content:'print("NEVER_EXECUTED")'}];
+  const write=await service.update(actor,draft.versionId,{revision:1,config:{...config,resources:updatedResources,document:source,instructions:'stale projection'}});assert.equal(write.revision,2);assert.equal(write.config.instructions,'修订后的指导');assert.equal(write.config.permissionMode,'agent');
+  assert.deepEqual(write.config.resources,updatedResources);
+  assert.deepEqual((await service.get(created.resourceId)).versions.find(v=>v.id===created.versionId).config.resources,config.resources);
+  await assert.rejects(service.update(actor,draft.versionId,{revision:2,config:{document:source,resources:[{path:'references/../secret',content:'bad'}]}}),e=>e.getStatus()===400);
+  assert.equal((await service.get(created.resourceId)).versions.find(v=>v.id===draft.versionId).revision,2);
+  assert.equal((await service.get(created.resourceId)).versions.find(v=>v.id===draft.versionId).config.document,source);
+  await assert.rejects(service.update(actor,draft.versionId,{revision:1,config}),e=>e.getStatus()===409);
+  await assert.rejects(service.update(actor,created.versionId,{revision:1,config}),e=>e.getStatus()===409);
+  const agentId=Number((await client.query("INSERT INTO agent_resources(kind,resource_key,name) VALUES('agent','support_agent','引用 Agent') RETURNING id")).rows[0].id);
+  const agentVersionId=Number((await client.query("INSERT INTO agent_resource_versions(resource_id,version,status,config) VALUES($1,1,'published',$2) RETURNING id",[agentId,JSON.stringify({skillVersionIds:[created.versionId]})])).rows[0].id);
+  await client.query("INSERT INTO agent_environment_bindings(agent_id,environment,version_id) VALUES($1,'dev',$2)",[agentId,agentVersionId]);
+  await client.query('UPDATE agent_resources SET current_version_id=$2 WHERE id=$1',[agentId,agentVersionId]);
+  await service.test(actor,draft.versionId,{});await service.publish(actor,draft.versionId);
+  const usage=await service.skillUsage(created.resourceId);assert.equal(usage.agents[0].skillVersionId,created.versionId);assert.equal(usage.agents[0].isCurrent,true);assert.deepEqual(usage.agents[0].environments,[]);
+  const content=await service.skillDocument(draft.versionId);assert.equal(content.document,source);assert.match(content.document,/name: legacy-support/);assert.match(content.document,/修订后的指导/);assert.deepEqual(content.bundle.resources,updatedResources);
+  const branch=await service.skillDraft(actor,created.resourceId,{fromVersionId:created.versionId,branch:true});
+  assert.equal((await service.get(created.resourceId)).versions.find(v=>v.id===branch.versionId).config.instructions,config.instructions);
+  assert.deepEqual((await service.get(created.resourceId)).versions.find(v=>v.id===branch.versionId).config.resources,config.resources);
+  const importedSource='---\nname: portable-example\ndescription: 导入资料\nallowed-tools: get_order\nallowed-kbs: [999999]\n---\n\n核实事实后回答\n';
+  const imported=await service.create(actor,{kind:'skill',key:'portable_example',name:'导入',config:{document:importedSource}});
+  const importedConfig=(await service.get(imported.resourceId)).versions[0].config;
+  assert.deepEqual(importedConfig.allowedKnowledgeBaseIds,[]);assert.equal(importedConfig.document,importedSource);
+  await service.test(actor,imported.versionId,{});await service.publish(actor,imported.versionId);
+  const emptySource='---\nname: empty-draft\ndescription: 待补充指导\n---\n';
+  const empty=await service.create(actor,{kind:'skill',key:'empty_draft',name:'新 Skill',config:{document:emptySource}});
+  const emptyVersion=(await service.get(empty.resourceId)).versions[0];assert.equal(emptyVersion.status,'draft');assert.equal(emptyVersion.config.instructions,'');
+  await assert.rejects(service.test(actor,empty.versionId,{}),e=>e.getStatus()===400&&e.message.includes('补充 Skill 正文'));
+  await assert.rejects(service.publish(actor,empty.versionId),e=>e.getStatus()===400&&e.message.includes('补充 Skill 正文'));
+  await service.update(actor,empty.versionId,{revision:1,config:{document:emptySource+'\n# 流程\n\n核实后回答。\n'}});
+  await service.test(actor,empty.versionId,{});await service.publish(actor,empty.versionId);
+  assert.equal((await service.get(empty.resourceId)).versions[0].status,'published');
+  // Tools share the working-draft UX but keep the explicit execution-test gate.
+  const toolConfig={type:'rest',description:'Fixture read only',endpoint:{url:'https://example.invalid/query',method:'GET',mappingMode:'explicit',bindings:[]},parameters:{type:'object',properties:{},additionalProperties:false},readOnly:true,requiresApproval:false,timeoutMs:30000,maxRetries:3};
+  const tool=await service.create(actor,{kind:'tool',key:'draft_read_fixture',name:'Tool draft fixture',config:toolConfig});
+  assert.equal((await service.toolDraft(actor,tool.resourceId,{})).versionId,tool.versionId);
+  await assert.rejects(service.test(actor,tool.versionId,{}),e=>e.getStatus()===400 && /执行测试/.test(e.message));
+  await assert.rejects(service.publish(actor,tool.versionId),e=>e.getStatus()===409);
+  const tested=(await service.get(tool.resourceId)).versions[0];
+  // Simulate the adapter's successful, revision-bound result without external I/O.
+  await service.recordToolTest(actor,tested,createHash('sha256').update(JSON.stringify({config:tested.config,prompt:null})).digest('hex'),{ok:true,content:'fixture adapter success'});
+  await service.publish(actor,tool.versionId);
+  const working=await service.toolDraft(actor,tool.resourceId,{});
+  assert.equal(working.reused,false);
+  assert.equal((await service.toolDraft(actor,tool.resourceId,{})).versionId,working.versionId);
+  await assert.rejects(service.toolDraft(actor,tool.resourceId,{fromVersionId:created.versionId}),e=>e.getStatus()===404);
+  const state=(await service.get(tool.resourceId)).versions.find(v=>v.id===working.versionId);
+  await service.update(actor,working.versionId,{revision:state.revision,config:{...state.config,description:'Changed draft'}});
+  await assert.rejects(service.publish(actor,working.versionId),e=>e.getStatus()===409);
+  assert.equal((await service.get(tool.resourceId)).versions.find(v=>v.id===tool.versionId).config.description,toolConfig.description);
+  assert.equal((await service.get(tool.resourceId)).versions.length,2);
+  const branchTool=await service.toolDraft(actor,tool.resourceId,{fromVersionId:tool.versionId,branch:true});
+  assert.notEqual(branchTool.versionId,working.versionId);
+  assert.equal((await service.get(tool.resourceId)).versions.find(v=>v.id===branchTool.versionId).config.description,toolConfig.description);
+  await client.query('UPDATE agent_resources SET archived_at=now(),enabled=false WHERE id=$1',[tool.resourceId]);
+  await assert.rejects(service.toolDraft(actor,tool.resourceId,{}),e=>e.getStatus()===404);
+  const newAgent=(await client.query("INSERT INTO agent_resources(kind,resource_key,name) VALUES('agent','unpublished_trial','Unpublished trial fixture') RETURNING id::int")).rows[0].id;
+  await client.query("INSERT INTO agent_resource_versions(resource_id,version,config) VALUES($1,1,'{}')",[newAgent]);
+  const integrations=new IntegrationService(database,{},{});
+  const trialInput={agentId:newAgent,name:'Bounded administrative trial',enabled:true,websiteEnabled:false,apiEnabled:false,allowedOrigins:[],scopes:['chat:write'],requestsPerMinute:20,concurrency:2,dailyRequests:200,dailyTokenLimit:1000000};
+  const trial=await integrations.save(actor,trialInput);
+  assert.equal(trial.agentId,newAgent);assert.equal(trial.dailyTokenLimit,1000000);assert.equal(trial.apiEnabled,false);assert.equal(trial.websiteEnabled,false);
+  await assert.rejects(integrations.save(actor,{...trialInput,apiEnabled:true},trial.id),e=>e.getStatus()===400);
+  await assert.rejects(integrations.save(actor,{...trialInput,websiteEnabled:true,allowedOrigins:['https://example.invalid']},trial.id),e=>e.getStatus()===400);
+  assert.equal((await integrations.app(trial.id)).apiEnabled,false);
+  await client.query('UPDATE agent_resources SET enabled=false WHERE id=$1',[newAgent]);
+  await assert.rejects(integrations.save(actor,trialInput),e=>e.getStatus()===400);
+  // The database trigger is a second guard against accidentally modifying published history.
+  await client.query('SAVEPOINT immutable_check');await assert.rejects(client.query('UPDATE agent_resource_versions SET revision=revision+1 WHERE id=$1',[created.versionId]),/immutable/);await client.query('ROLLBACK TO SAVEPOINT immutable_check');
+ }finally{await client.query('ROLLBACK');await client.end();}
+});

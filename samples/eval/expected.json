@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "cases": [
+    { "id": "returns-basic", "question": "退货期限是多少？", "expected": { "refused": false, "evidenceDocument": "returns.md", "mustContain": ["七天"], "citationRequired": true, "maxToolCalls": 3, "noDuplicateToolCalls": true } },
+    { "id": "returns-citation", "question": "退货政策是什么？", "expected": { "refused": false, "evidenceDocument": "returns.md", "citationRequired": true, "maxToolCalls": 3 } },
+    { "id": "unsupported-refusal", "question": "你们支持海外配送吗？", "expected": { "refused": true, "citationRequired": false, "maxToolCalls": 3 } },
+    { "id": "product-list", "question": "你们有哪些产品？", "expected": { "refused": false, "productId": "heater-h2", "maxToolCalls": 5, "noDuplicateToolCalls": true } },
+    { "id": "product-detail", "question": "H2 的规格是什么？", "expected": { "refused": false, "productId": "heater-h2", "maxToolCalls": 5 } },
+    { "id": "duplicate-call", "question": "退货政策是什么？", "expected": { "refused": true, "duplicateCount": 1, "maxToolCalls": 3, "toolError": "duplicate_tool_call" } },
+    { "id": "tool-limit", "question": "请反复查询退货政策。", "runtime": { "maxToolCalls": 3, "maxPlannerRounds": 5 }, "expected": { "refused": true, "maxToolCalls": 3, "toolCallCountAtMost": 4, "toolError": "tool_call_limit_exceeded" } },
+    { "id": "session-isolation", "question": "会话隔离检查", "expected": { "refused": false, "sessionEvidenceMustNotContain": "heater-h2", "citationRequired": true } }
+  ]
+}

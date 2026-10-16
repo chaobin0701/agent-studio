@@ -1,0 +1,54 @@
+import { z } from "zod";
+import type { AgentTool } from "../ai/tools/agent-tool";
+import type { ToolSpec, ResourceVersion } from "./resource.types";
+import {
+  executeHttp,
+  type HttpDependencies,
+} from "../tool-management/http-tool";
+
+export function makeManagedTool(
+  v: ResourceVersion,
+  lookup: (key: string) => AgentTool,
+  deps: HttpDependencies = {},
+): AgentTool {
+  const spec = v.config as ToolSpec;
+  const base = spec.type === "rest" ? undefined : lookup(spec.target!);
+  const schema = z.fromJSONSchema(spec.parameters as any);
+  return {
+    execution: {
+      ...base?.execution,
+      channel: "tools",
+      source:
+        spec.type === "rest" ? "http" : spec.type === "mcp" ? "mcp" : "builtin",
+      toolVersionId: v.id,
+    },
+    runtimeLimits: { maxRetries: spec.maxRetries, timeoutMs: spec.timeoutMs },
+    name: v.key,
+    description: spec.description,
+    inputSchema: base ? z.intersection(base.inputSchema, schema) : schema,
+    parameters: spec.parameters,
+    capabilities: base?.capabilities,
+    contributeContext: base?.contributeContext,
+    resultCacheKey:
+      spec.readOnly && !spec.requiresApproval
+        ? base?.resultCacheKey
+        : undefined,
+    planning: {
+      canBatch: base?.planning?.canBatch ?? spec.readOnly,
+      dependency: base?.planning?.dependency,
+      isIdempotent: base
+        ? (base.planning?.isIdempotent ?? spec.readOnly)
+        : spec.readOnly || !!spec.idempotencyHeader,
+    },
+    async execute(input: any, context) {
+      if (spec.requiresApproval && !context.approvedTools?.includes(v.key))
+        return {
+          success: false,
+          content: "该工具需要人工批准",
+          errorCode: "tool_approval_required",
+        };
+      if (base) return base.execute(input, context);
+      return executeHttp(v, input, context, deps);
+    },
+  };
+}

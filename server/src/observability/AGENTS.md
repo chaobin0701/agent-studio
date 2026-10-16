@@ -1,0 +1,9 @@
+# Execution observability
+
+Use the private Phoenix TypeScript SDK provider and explicit OpenInference spans. Framework automatic capture uses request-local, version-pinned OpenInference SDK callbacks, sanitized before the SDK and filtered before the private OTEL provider. Never construct the global LangChain instrumenter, enable ambient full-state capture, or install process-wide hooks/providers. Framework spans are metadata-only CHAINs, without Token counters; paid model attempts remain the single authoritative LLM spans. Only local/private collector URLs are accepted; no cloud fallback, redirects or ambient OTEL headers. Allowlist identifiers, versions, counters, durations, safe classifications and status; reject raw messages, Prompt bodies, documents, tool arguments/results and credentials.
+
+Export failure, timeout or a full queue cannot fail business execution or become its accounting authority. Network work is asynchronous, bounded and does not retry. Keep local Trace, audit and model-attempt accounting authoritative.
+
+Ordinary execution views use an allowlist projection, not a state dump. Raw local diagnostics retain their separate audited debug permission. A local collector can span workspaces: links require the global `observability.external.read` grant AND the selected workspace's `conversations.read` access. Use workspace-scoped query, never platformQuery; reconstruct only configured local links with stored project/trace mapping. Legacy stored external links must remain hidden. Phoenix itself is host-administrator tooling, not tenant-isolated resource management.
+
+Docker Compose uses an independent project, PostgreSQL database and persistent volumes, a loopback-only gateway port, and an internal backend network with telemetry/external resources/assistant/MCP disabled. Do not attach the business database or restart existing services during validation. Do not migrate Prompt, Agent or knowledge management into Phoenix.

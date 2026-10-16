@@ -1,0 +1,38 @@
+/* Public ElDialog class hooks; keep its native focus, overlay and theme behavior. */
+.management-dialog {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  max-width: calc(100vw - 2rem);
+  max-height: calc(100vh - 2rem);
+  max-height: calc(100dvh - 2rem);
+  overflow: hidden;
+}
+
+.management-dialog-header,
+.management-dialog-footer {
+  flex: 0 0 auto;
+}
+
+.management-dialog-body {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.management-dialog-footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  justify-content: flex-end;
+}
+
+.management-dialog .management-dialog-footer > .el-button {
+  margin-left: 0;
+}
+
+.management-dialog .management-input-number {
+  width: 100%;
+}

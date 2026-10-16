@@ -1,0 +1,18 @@
+:80 {
+  handle /api/* {
+    reverse_proxy api:3020 {
+      flush_interval -1
+    }
+  }
+  redir /chat /chat/
+  handle_path /chat/* {
+    root * /srv/chat
+    try_files {path} /index.html
+    file_server
+  }
+  handle {
+    root * /srv/admin
+    try_files {path} /index.html
+    file_server
+  }
+}

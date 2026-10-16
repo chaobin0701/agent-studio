@@ -1,0 +1,7 @@
+# Execution file outputs
+
+File outputs are selected from the native Run-local virtual workspace, not host paths, URLs, raw framework state, tool result fields or long-term memory. Export requires the entry and producing Agent's immutable published file-output grant. A final answer selects files explicitly; unselected scratch files, Skills, documents, context and failed/cancelled executions never become persisted artifacts.
+
+Do not copy the virtual files state or file bytes into Trace/Phoenix/public artifact metadata. Persist bounded UTF-8 bytes atomically with the completed local execution record; artifact fields expose only server-generated IDs and metadata. Ordinary user input/final answers retain their existing governed business history; artifact TTL is not deletion of all business records. Download rechecks workspace, app/visitor ownership and current credentials. Admin read follows execution-read permission; purge needs a separate workspace permission and audit. Never embed credentials or bearer tokens in a URL or render executable contents inline.
+
+Use PostgreSQL RLS and reference/immutable triggers, not a parallel filesystem store. Retention may use only the explicitly bounded DB maintenance function that purges expired or failed execution bytes, without exposing rows or accepting arbitrary targets. No pg-boss/AppModule startup against the shared main project during tests. All migration/HTTP tests use isolated schemas and loopback services.

@@ -1,0 +1,9 @@
+# Agent Runtime
+
+This directory owns common JSON contracts, budget enforcement, output failure classification and privacy callbacks. The custom AgentGraph, Loop, Runner, node adapters, their state codecs and fixed planner protocol have been deleted. General execution belongs exclusively to ../deep-agents/ and the mature LangChain/LangGraph runtime. Do not reintroduce a general decision loop, static fallback, fixed extra answer model or implicit Skill Agent.
+
+Signals, callbacks, credentials and services remain in live host context, never in persistable generic output or diagnostics exports. LlmService is the authoritative model retry/accounting layer; ToolExecutionService is the capability policy/attempt layer. Chat/Run adapters own authorization, snapshots, persistence and transport. Only metadata-only private application tracing may export execution records.
+
+Native tool batches are sequential and lossless: keep every model-provided call ID and pair it with a result. Independent calls, including different record IDs for the same read tool, share one planning round. A successful guidance-changing tool may require replanning before subsequent calls; return explicit deferred results instead of slicing or silently dropping the batch tail. Deferred calls do not consume execution budget or enter duplicate history, and still pass policy/input checks.
+
+Runtime context contributions are explicit, typed business data, never instructions. Model tools and passive/host preload share contribution records, but passive data must not fabricate native assistant/tool messages. Conversation persistence and freshness/visibility checks remain in the chat/document adapters; the runtime receives only bounded validated resources. Historic tool bodies are projected to current resource references so disabled or invalid memory cannot leak back through transcript replay. Restored resources do not consume tool execution budget or create artificial execution events.

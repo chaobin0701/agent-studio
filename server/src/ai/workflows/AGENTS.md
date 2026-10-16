@@ -1,0 +1,9 @@
+# Governed specialized LangGraph flows
+
+Only trusted, code-versioned deterministic graphs belong here. Deep Agents remains the sole general-purpose Agent loop. Register compiled StateGraph factories, never model/database-supplied graph definitions or a second planner/tool loop. Registration does not grant a Tool to an Agent or grant the flow's dependencies.
+
+Flows are explicit published Tool capabilities. Run inside the native host's live request context; reuse the fixed Agent model/Prompt, tool state, budget, accounting, cancellation and metadata-only tracing. All effects use the supplied governed ports, not raw SDKs, HTTP, host files, shell, a new budget or a mutable configuration lookup. No flow-level/node retries, hidden output repair, nested workflows or delegation. Trusted graph code is not a sandbox.
+
+The zero-effect reference graph may also run through the existing authenticated administrative Tool test. That separate pure host has zero model/tool budget, no LlmService/gateway, Prompt or published dependencies. Effectful draft tests use WorkflowTestService with an explicitly selected application's published Agent snapshot, existing admission/ledger/budget and dependency approvals. The administrator grants only the draft target, never additional dependencies. Effectful graphs must fail closed outside an authorized host; do not add a permissive standalone fallback or an extra general planning loop for tests.
+
+Input, intermediate business state and final results must be bounded JSON. Signals, services and callbacks stay in live closures, not graph state or exported diagnostics. Expose only final validated/redacted results, not graph streams. No checkpoint/resume guarantee. Page interaction remains user-owned; tests must invoke actual LangGraph and the formal native Tool path.

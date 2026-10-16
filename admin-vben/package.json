@@ -1,0 +1,36 @@
+{
+  "name": "agent-studio-admin",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "scripts": {
+    "dev": "pnpm --filter @agent-studio/admin dev",
+    "build": "pnpm --filter @agent-studio/admin build",
+    "typecheck": "pnpm --filter @agent-studio/admin typecheck",
+    "preview": "pnpm --filter @agent-studio/admin preview",
+    "postinstall": "pnpm -r run --if-present stub",
+    "test": "node --test test/*.test.mjs tests/*.test.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "@vben/tailwind-config": "workspace:*",
+    "@vben/tsconfig": "workspace:*",
+    "@vben/vite-config": "workspace:*",
+    "@vitejs/plugin-vue": "catalog:",
+    "@vitejs/plugin-vue-jsx": "catalog:",
+    "@tsdown/css": "catalog:",
+    "cross-env": "catalog:",
+    "tailwindcss": "catalog:",
+    "tsdown": "catalog:",
+    "typescript": "catalog:",
+    "vite": "catalog:",
+    "vue": "catalog:",
+    "vue-tsc": "catalog:"
+  },
+  "engines": {
+    "node": "^22.18.0 || ^24.12.0",
+    "pnpm": ">=11.0.0"
+  },
+  "packageManager": "pnpm@11.16.0"
+}
