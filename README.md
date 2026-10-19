@@ -25,31 +25,6 @@ Agent Studio 负责资源版本、权限和执行；业务系统继续拥有自�
 
 本地示例工作区的管理首页集中呈现资源入口、最近编辑的 Agent、执行情况和知识库处理状态。
 
-## 从配置到运行
-
-1. **组合能力：**配置模型方案与业务 Prompt，按需关联知识库、Skill、HTTP / MCP Tool 和成员 Agent。无需知识库或工具的 Agent 也能直接运行。
-2. **调试发布：**在后台试运行草稿，检查工具调用和回答；发布后形成可追溯的 Agent 版本。
-3. **接入执行：**聊天端或应用 API 提交请求，服务端校验身份、工作区、权限和预算，再固定当前生效版本及其依赖。
-4. **返回结果：**Deep Agents 在授权范围内调用模型、检索资料或执行工具，通过 JSON / SSE 返回答案、引用、公开进度与用量。
-
-## 架构一览
-
-```mermaid
-flowchart LR
-    CLIENT["管理后台 · 聊天端 · 外部应用"] --> API["NestJS API"]
-    API --> CONTROL["资源管理<br/>工作区 · 权限 · 版本"]
-    API --> RUN["Chat / Run<br/>准入 · 快照 · 预算"]
-    RUN --> AGENT["Deep Agents"]
-    AGENT --> MODEL["模型"]
-    AGENT --> RAG["RAG 检索"]
-    AGENT --> TOOL["HTTP / MCP 工具"]
-    CONTROL --> DB[(PostgreSQL / pgvector)]
-    RUN --> DB
-    RAG --> DB
-```
-
-管理控制面维护资源与版本，执行面处理对话、独立任务和受控能力调用。文档解析与索引由独立的 pg-boss Worker 异步完成；后台在 `admin-vben/`，中性聊天端在 `chat/`，两者复用 `packages/chat-ui/`。详细设计见[平台架构](docs/generic-agent-platform.md)、[知识库管理](docs/knowledge-management.md)和[工具管理](docs/tool-management.md)。
-
 ## 技术栈
 
 | 层 | 技术 |
