@@ -92,7 +92,7 @@ test('editing knowledge base basic information preserves its existing enabled st
 });
 
 test('knowledge base publishing controls require management permission', () => {
-  for (const method of ['create', 'update', 'archive', 'processing', 'indexConfig', 'settings', 'retryIndex']) {
+  for (const method of ['create', 'update', 'archive', 'unarchive', 'processing', 'indexConfig', 'settings', 'retryIndex']) {
     assert.deepEqual(Reflect.getMetadata(PERMISSION_KEY, KnowledgeBaseController.prototype[method]), ['knowledge_bases.manage']);
   }
   assert.deepEqual(Reflect.getMetadata(PERMISSION_KEY, KnowledgeBaseController.prototype.upload), ['documents.upload']);
@@ -183,6 +183,22 @@ test('nonexistent or already archived bases never produce writes or audit entrie
   } }) });
   await assert.rejects(bases.archive(7, 3), error => error.getStatus() === 404);
   assert.equal(statements.length, 1);
+});
+
+test('restoring a knowledge base preserves content and indexes and requires a separate enable action', async () => {
+  const statements = [];
+  const service = new KnowledgeBaseService({ transaction: work => work({ query: async (sql, values) => {
+    statements.push({ sql, values });
+    return { rows: sql.startsWith('UPDATE') ? [{ id: 3 }] : [] };
+  } }) });
+  assert.deepEqual(await service.unarchive(7, 3), { id: 3, archived: false });
+  assert.match(statements[0].sql, /archived_at=NULL,enabled_for_chat=false/);
+  assert.match(statements[0].sql, /archived_at IS NOT NULL/);
+  assert.ok(statements.every(({ sql }) => !/DELETE|UPDATE documents|active_index_version_id/.test(sql)));
+  assert.match(statements[1].sql, /knowledge_base.unarchived/);
+  assert.deepEqual(statements[1].values, [7, '3']);
+  const missing = new KnowledgeBaseService({ transaction: work => work({ query: async () => ({ rows: [] }) }) });
+  await assert.rejects(missing.unarchive(7, 3), error => error.getStatus() === 404);
 });
 
 test('legacy diagnostic lookup does not choose an archived default published index', async () => {
@@ -546,6 +562,19 @@ test('PostgreSQL migration, document scope and chat visibility remain isolated',
     }
     await assert.rejects(bases.archive(actor, defaultBase.id), error => error.getStatus() === 404);
     assert.equal((await client.query("SELECT count(*)::int AS count FROM audit_logs WHERE action='knowledge_base.archived' AND target_id=$1", [String(defaultBase.id)])).rows[0].count, 1);
+    assert.deepEqual(await bases.unarchive(actor, defaultBase.id), { id: defaultBase.id, archived: false });
+    const restoredBase = await bases.get(defaultBase.id);
+    assert.equal(restoredBase.archivedAt, null);
+    assert.equal(restoredBase.enabledForChat, false);
+    assert.equal(String(restoredBase.activeIndexVersionId), String(version.id));
+    const restoredSearch = new SearchService(database, {enabled:false}, versionSearch);
+    const restoredScope = [{id:defaultBase.id,indexVersionId:Number(version.id)}];
+    assert.equal((await restoredSearch.searchForAgent('默认归档测试资料', 5,restoredScope)).hits.length, 0);
+    await assert.rejects(bases.unarchive(actor, defaultBase.id), error => error.getStatus() === 404);
+    await bases.update(actor, defaultBase.id, { enabledForChat: true });
+    assert.equal((await restoredSearch.searchForAgent('默认归档测试资料', 5,restoredScope)).hits.length, 1);
+    assert.deepEqual((await client.query('SELECT * FROM documents WHERE knowledge_base_id=$1 ORDER BY id', [defaultBase.id])).rows, documentRows);
+    assert.deepEqual((await client.query('SELECT * FROM knowledge_index_versions WHERE knowledge_base_id=$1 ORDER BY id', [defaultBase.id])).rows, indexRows);
   } finally {
     await client.query('ROLLBACK');
     await client.end();

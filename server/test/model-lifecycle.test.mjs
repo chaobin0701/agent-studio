@@ -4,6 +4,8 @@ import test from 'node:test';
 import { CredentialAccess,credentialPreview } from '../dist/model-management/credential-access.js';
 import { ModelManagementService } from '../dist/model-management/model-management.service.js';
 import { ModelManagementController } from '../dist/model-management/model-management.controller.js';
+import { embeddingFingerprint,embeddingProfileSchema } from '../dist/documents/profile-embedding.js';
+import { EmbeddingProfileService } from '../dist/documents/embedding-profile.service.js';
 
 test('credential previews never expose short credentials and retain long-key identifiers',()=>{
   assert.equal(credentialPreview('abcd1234'),'••••••••');
@@ -145,10 +147,43 @@ test('PostgreSQL: automatic drafts, publication pointer, protected deletion, res
     const vectorAccount=await service.createAccount(actor,'embedding',{name:'vector account',platformKey:'custom',baseUrl,apiKey:'vector-fixture-key'});
     const vectorDeployment=await service.saveDeployment(actor,'embedding',null,{name:'vector',accountId:vectorAccount.id,config:{provider:'openai-compatible',model:'vectors',dimensions:2}});
     const vectorPlan=await service.createPlan(actor,'embedding',{name:'vector plan',deploymentIds:[vectorDeployment.id]});
+    // Migration can retain a disabled profile and its KB reference while resetting the plan to draft.
+    const importedConfig=embeddingProfileSchema.parse({provider:'openai-compatible',baseUrl,model:'vectors',dimensions:2});
+    const importedProfile=(await client.query(`INSERT INTO embedding_profiles(name,platform_key,config,enabled,model_account_id,model_plan_version_id)
+      VALUES('imported vector profile','custom',$1,false,$2,$3) RETURNING id::int`,[JSON.stringify(importedConfig),vectorAccount.id,vectorPlan.id])).rows[0];
+    const importedSnapshot={...importedConfig,profileId:importedProfile.id,fingerprint:embeddingFingerprint(importedConfig)};
+    await client.query('UPDATE embedding_profiles SET config=$2 WHERE id=$1',[importedProfile.id,JSON.stringify(importedSnapshot)]);
+    const linkedBase=(await client.query("INSERT INTO knowledge_bases(name,draft_config) VALUES('imported knowledge',$1) RETURNING id::int",[JSON.stringify({embeddingProfileId:importedProfile.id})])).rows[0];
+    const embeddingProfiles=new EmbeddingProfileService(database,runtime,new SecretBox(runtime));
+    assert.ok(!(await embeddingProfiles.choices(true)).some(p=>p.id===importedProfile.id));
     assert.equal((await service.testAndPublish(actor,'embedding',vectorPlan.id)).published,true);
+    const publishedProfiles=(await client.query('SELECT id::int,config,enabled FROM embedding_profiles WHERE model_plan_version_id=$1',[vectorPlan.id])).rows;
+    assert.equal(publishedProfiles.length,1);
+    assert.equal(publishedProfiles[0].id,importedProfile.id,'publishing must reuse the imported profile ID');
+    assert.equal(publishedProfiles[0].enabled,true);
+    assert.deepEqual(publishedProfiles[0].config,importedSnapshot);
+    assert.equal((await client.query('SELECT draft_config FROM knowledge_bases WHERE id=$1',[linkedBase.id])).rows[0].draft_config.embeddingProfileId,importedProfile.id);
+    assert.ok((await embeddingProfiles.choices(true)).some(p=>p.id===importedProfile.id));
     const vectorFirst=await service.version(database,'embedding',vectorPlan.id);
     const vectorDraft=await service.workingDraft(actor,'embedding',vectorFirst.plan_id,{});
     assert.equal((await service.testAndPublish(actor,'embedding',vectorDraft.versionId)).published,true);
+    const conflictingDraft=await service.workingDraft(actor,'embedding',vectorFirst.plan_id,{});
+    const otherAccount=await service.createAccount(actor,'embedding',{name:'other vector account',platformKey:'custom',baseUrl,apiKey:'other-vector-fixture-key'});
+    const conflictingProfile=(await client.query(`INSERT INTO embedding_profiles(name,platform_key,config,enabled,model_account_id,model_plan_version_id)
+      VALUES('protected vector profile','custom',$1,false,$2,$3) RETURNING id::int`,[JSON.stringify(importedConfig),vectorAccount.id,conflictingDraft.versionId])).rows[0];
+    for(const conflict of [
+      {config:{...importedConfig,model:'other-space'},accountId:vectorAccount.id},
+      {config:{...importedConfig,dimensions:3},accountId:vectorAccount.id},
+      {config:importedConfig,accountId:otherAccount.id},
+    ]) {
+      const snapshot={...conflict.config,profileId:conflictingProfile.id,fingerprint:embeddingFingerprint(conflict.config)};
+      await client.query('UPDATE embedding_profiles SET config=$2,model_account_id=$3 WHERE id=$1',[conflictingProfile.id,JSON.stringify(snapshot),conflict.accountId]);
+      await assert.rejects(service.testAndPublish(actor,'embedding',conflictingDraft.versionId),e=>e.getStatus()===409&&/向量配置/.test(e.message));
+      const unchanged=(await client.query('SELECT config,enabled,model_account_id::int FROM embedding_profiles WHERE id=$1',[conflictingProfile.id])).rows[0];
+      assert.deepEqual(unchanged,{config:snapshot,enabled:false,model_account_id:conflict.accountId});
+      assert.equal((await service.version(database,'embedding',conflictingDraft.versionId)).status,'draft');
+      assert.equal((await service.list('embedding')).plans.find(p=>p.id===vectorFirst.plan_id).current_version_id,vectorDraft.versionId);
+    }
     const profilesBefore=(await client.query('SELECT id,enabled,config FROM embedding_profiles ORDER BY id')).rows;
     await service.rollbackPlan(actor,'embedding',vectorFirst.plan_id,{versionId:vectorFirst.id,expectedCurrentVersionId:vectorDraft.versionId});
     assert.equal((await service.list('embedding')).plans[0].current_version_id,vectorFirst.id);

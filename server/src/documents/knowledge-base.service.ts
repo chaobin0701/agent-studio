@@ -88,4 +88,16 @@ export class KnowledgeBaseService {
       return { id, archived: true };
     });
   }
+
+  async unarchive(actorId: number, id: number) {
+    return this.database.transaction(async client => {
+      const row = (await client.query(`UPDATE knowledge_bases
+        SET archived_at=NULL,enabled_for_chat=false,updated_at=now()
+        WHERE id=$1 AND archived_at IS NOT NULL RETURNING id::int`, [id])).rows[0];
+      if (!row) throw new NotFoundException('Archived knowledge base not found');
+      await client.query(`INSERT INTO audit_logs(actor_admin_id,action,target_type,target_id)
+        VALUES($1,'knowledge_base.unarchived','knowledge_base',$2)`, [actorId, String(id)]);
+      return { id, archived: false };
+    });
+  }
 }

@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { Pool } from 'pg';
 import { PgBoss } from 'pg-boss';
-import { DOCUMENT_INGEST_QUEUE, KNOWLEDGE_INDEX_QUEUE, KNOWLEDGE_AUTO_QUEUE } from './documents/document-queue.service';
+import { DOCUMENT_INGEST_QUEUE, KNOWLEDGE_INDEX_QUEUE, KNOWLEDGE_AUTO_QUEUE, startDocumentQueues } from './documents/document-queue.service';
 import { prepareAutoIndex } from './documents/auto-index';
 import { buildKnowledgeIndex } from './documents/build-knowledge-index';
 import { documentPath } from './documents/document-storage';
@@ -119,10 +119,7 @@ async function bootstrap(): Promise<void> {
   bossForAuto=boss;
   const pool = scopedPool(new Pool({ connectionString }));
   boss.on('error', (error) => console.error('Worker queue error:', error));
-  await boss.start();
-  await boss.createQueue(DOCUMENT_INGEST_QUEUE);
-  await boss.createQueue(KNOWLEDGE_INDEX_QUEUE);
-  await boss.createQueue(KNOWLEDGE_AUTO_QUEUE);
+  await startDocumentQueues(boss);
   await boss.work<{knowledgeBaseId:number;workspaceId:number}>(KNOWLEDGE_AUTO_QUEUE,async([job])=>inWorkspace(job.data.workspaceId,async()=>{
     const client=await pool.connect();
     try {

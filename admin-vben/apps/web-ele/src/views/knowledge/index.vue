@@ -270,6 +270,35 @@ async function archiveBase() {
     ElMessage.success("知识库已归档");
   });
 }
+async function changeBaseState(row: any) {
+  if (!manage.value || busy.value || loading.value) return;
+  if (dirty.value) return ElMessage.warning("请先保存或放弃设置修改");
+  const target = `/knowledge-bases/${row.id}`,
+    current = base.value,
+    scope = workspace.generation,
+    archived = !!row.archivedAt,
+    enabled = !row.enabledForChat;
+  try {
+    await ElMessageBox.confirm(
+      archived
+        ? "恢复后保留文档和原索引，知识库保持停用，可随后点击启用。确认恢复？"
+        : enabled
+          ? "启用后允许 Agent 检索此知识库中的可用文档。确认启用？"
+          : "停用后立即停止召回，文档和索引会保留。确认停用？",
+      archived ? "恢复知识库" : enabled ? "启用知识库" : "停用知识库",
+    );
+  } catch {
+    return;
+  }
+  if (current !== base.value || scope !== workspace.generation) return;
+  await run(async () => {
+    if (archived) await api.post(`${target}/unarchive`, {});
+    else await api.patch(target, { enabledForChat: enabled });
+    if (current !== base.value || scope !== workspace.generation) return;
+    await load();
+    ElMessage.success(archived ? "知识库已恢复，可按需启用" : enabled ? "知识库已启用" : "知识库已停用");
+  });
+}
 async function action(
   path: string,
   method: "post" | "patch" = "post",
@@ -485,6 +514,13 @@ onBeforeUnmount(() => {
         >新建知识库</ElButton
       >
       <ElButton
+        v-if="manage && detail"
+        :type="detail.archivedAt || !detail.enabledForChat ? 'primary' : 'default'"
+        :disabled="busy || loading"
+        @click="changeBaseState(detail)"
+        >{{ detail.archivedAt ? '恢复知识库' : detail.enabledForChat ? '停用知识库' : '启用知识库' }}</ElButton
+      >
+      <ElButton
         v-if="manage && detail && !detail.archivedAt"
         :disabled="busy"
         @click="openBase(true)"
@@ -582,6 +618,13 @@ onBeforeUnmount(() => {
           ><template #default="{ row }">{{
             dateTime(row.updatedAt)
           }}</template></ElTableColumn
+        >
+        <ElTableColumn v-if="manage" label="操作" width="150"
+          ><template #default="{ row }"
+            ><ElButton link type="primary" :disabled="busy || loading" @click="changeBaseState(row)">
+              {{ row.archivedAt ? '恢复知识库' : row.enabledForChat ? '停用' : '启用' }}
+            </ElButton></template
+          ></ElTableColumn
         >
       </ElTable>
     </PagePanel>

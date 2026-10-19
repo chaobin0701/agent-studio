@@ -1,0 +1,40 @@
+{
+  admin off
+}
+
+{$WEBSITE_DOMAIN} {
+  encode zstd gzip
+  reverse_proxy hub:3300 {
+    flush_interval -1
+  }
+  header {
+    X-Content-Type-Options nosniff
+    Referrer-Policy strict-origin-when-cross-origin
+    -Server
+  }
+}
+
+{$ADMIN_DOMAIN} {
+  encode zstd gzip
+  handle /api/* {
+    reverse_proxy api:3020 {
+      flush_interval -1
+    }
+  }
+  redir /chat /chat/
+  handle_path /chat/* {
+    root * /srv/chat
+    try_files {path} /index.html
+    file_server
+  }
+  handle {
+    root * /srv/admin
+    try_files {path} /index.html
+    file_server
+  }
+  header {
+    X-Content-Type-Options nosniff
+    Referrer-Policy strict-origin-when-cross-origin
+    -Server
+  }
+}

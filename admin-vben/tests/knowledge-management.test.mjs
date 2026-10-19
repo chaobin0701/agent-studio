@@ -17,8 +17,8 @@ function fixture(api){
   useUnsavedChanges:()=>async()=>true,watch(){},onMounted(){},onBeforeUnmount(){},
   ElMessage:{warning(){},success(){}},ElMessageBox:{confirm:async()=>{}},
  };
- runInNewContext(`${compiled}\nglobalThis.page={load,loadChoices,openBase,run,items,detail,documents,profiles,defaultProfile,dialog,page,documentState,loading,failed,actionError};`,context);
- return {page:context.page,workspace,route};
+ runInNewContext(`${compiled}\nglobalThis.page={load,loadChoices,openBase,changeBaseState,run,items,detail,documents,profiles,defaultProfile,dialog,page,documentState,loading,failed,actionError};`,context);
+ return {page:context.page,workspace,route,context};
 }
 test('late knowledge list responses and failures cannot overwrite a new workspace',async()=>{
  for(const fail of [false,true]){
@@ -42,4 +42,31 @@ test('changing workspace while loading creation choices never opens a stale sett
  const open=f.page.openBase();f.workspace.id=2;f.workspace.generation++;
  choices.resolve([{id:7,name:'old profile'}]);settings.resolve({defaultEmbeddingPlanVersionId:9,embeddingPlans:[{id:9,profileId:7}]});await open;
  assert.equal(f.page.dialog.value,'');assert.equal(f.page.profiles.value.length,0);assert.equal(f.page.defaultProfile.value,undefined);
+});
+
+test('knowledge bases can be restored from the list and explicitly enabled or disabled',async()=>{
+ const calls=[];
+ const f=fixture({get:async()=>[],post:async(url,body)=>calls.push(['post',url,body]),patch:async(url,body)=>calls.push(['patch',url,body])});
+ await f.page.changeBaseState({id:5,archivedAt:'now',enabledForChat:false});
+ await f.page.changeBaseState({id:5,archivedAt:null,enabledForChat:false});
+ await f.page.changeBaseState({id:5,archivedAt:null,enabledForChat:true});
+ assert.deepEqual(JSON.parse(JSON.stringify(calls)),[
+  ['post','/knowledge-bases/5/unarchive',{}],
+  ['patch','/knowledge-bases/5',{enabledForChat:true}],
+  ['patch','/knowledge-bases/5',{enabledForChat:false}],
+ ]);
+});
+
+test('knowledge state changes keep API failures visible and never act after workspace changes or cancelled confirmation',async()=>{
+ let writes=0;
+ const f=fixture({get:async()=>[],post:async()=>{writes++;throw {response:{data:{error:{message:'恢复失败'}}}};}});
+ const archived={id:5,archivedAt:'now',enabledForChat:false};
+ await f.page.changeBaseState(archived);
+ assert.equal(f.page.actionError.value,'恢复失败');assert.equal(writes,1);
+ f.context.ElMessageBox.confirm=async()=>{throw Error('cancelled')};
+ await f.page.changeBaseState(archived);assert.equal(writes,1);
+ const confirmation=deferred();f.context.ElMessageBox.confirm=()=>confirmation.promise;
+ const pending=f.page.changeBaseState(archived);f.workspace.id=2;f.workspace.generation++;
+ confirmation.resolve();await pending;assert.equal(writes,1);
+ f.page.loading.value=true;await f.page.changeBaseState(archived);assert.equal(writes,1);
 });

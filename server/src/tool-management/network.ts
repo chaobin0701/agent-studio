@@ -2,7 +2,6 @@ import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
 import { request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
-import { Readable, Transform } from "node:stream";
 
 export class ToolNetworkError extends Error {
   constructor(
@@ -126,34 +125,48 @@ async function restrictedFetch(
         for (const [key, value] of Object.entries(incoming.headers))
           if (value !== undefined)
             headers.set(key, Array.isArray(value) ? value.join(", ") : value);
-        let size = 0;
-        const bounded = new Transform({
-          transform(chunk, _encoding, callback) {
-            size += chunk.length;
-            callback(
-              size > 4 * 1024 * 1024
-                ? new ToolNetworkError(
-                    "tool_response_too_large",
-                    "工具响应超过 4 MB",
-                  )
-                : null,
-              chunk,
-            );
-          },
-        });
-        incoming.on("error", (error) => bounded.destroy(error));
-        bounded.on("close", () => incoming.destroy());
-        incoming.pipe(bounded);
         if ([204, 205, 304].includes(status)) {
           incoming.resume();
           resolve(new Response(null, { status, headers }));
-        } else
-          resolve(
-            new Response(Readable.toWeb(bounded) as ReadableStream, {
-              status,
-              headers,
-            }),
-          );
+        } else {
+          // MCP clients may cancel a response as soon as their message is read.
+          // Guard an in-flight pull after cancellation rather than letting the
+          // Node-to-Web adapter enqueue into an already closed controller.
+          const iterator = incoming[Symbol.asyncIterator]();
+          let closed = false;
+          let size = 0;
+          const stream = new ReadableStream<Uint8Array>({
+            async pull(controller) {
+              try {
+                const part = await iterator.next();
+                if (closed) return;
+                if (part.done) {
+                  closed = true;
+                  controller.close();
+                  return;
+                }
+                size += part.value.length;
+                if (size > 4 * 1024 * 1024) {
+                  closed = true;
+                  incoming.destroy();
+                  controller.error(new ToolNetworkError("tool_response_too_large", "工具响应超过 4 MB"));
+                  return;
+                }
+                controller.enqueue(new Uint8Array(part.value));
+              } catch (error) {
+                if (!closed) {
+                  closed = true;
+                  controller.error(error);
+                }
+              }
+            },
+            cancel() {
+              closed = true;
+              incoming.destroy();
+            },
+          });
+          resolve(new Response(stream, { status, headers }));
+        }
       },
     );
     outgoing.on("error", reject);

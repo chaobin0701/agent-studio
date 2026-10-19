@@ -23,6 +23,12 @@ export class KnowledgeBaseController {
     private readonly profiles: EmbeddingProfileService, private readonly search: VersionSearchService,
     private readonly liveSearch: SearchService) {}
 
+  @Post(':id/unarchive')
+  @RequirePermission('knowledge_bases.manage')
+  unarchive(@Req() request: AdminRequest, @Param('id', ParseIntPipe) id: number) {
+    return this.bases.unarchive(request.admin!.id, id);
+  }
+
   @Post(':id/recall-test')
   @RequirePermission('documents.read')
   recallTest(@Param('id', ParseIntPipe) id: number, @Body() body: { query?: unknown; topK?: unknown; retrievalMode?: unknown }) {

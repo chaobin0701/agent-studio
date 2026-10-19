@@ -1,6 +1,6 @@
 # Agent Studio
 
-私有的通用 Agent 构建与运行平台。基于 Deep Agents / LangGraph、NestJS、PostgreSQL / pgvector，以及 Vben + Element Plus。
+开源的通用 Agent 构建与运行平台。基于 Deep Agents / LangGraph、NestJS、PostgreSQL / pgvector，以及 Vben + Element Plus。配套的独立展示站见 [Demo Hub](https://github.com/chaobin0701/demo-hub)。
 
 ## 项目边界
 
@@ -55,3 +55,5 @@ PostgreSQL 集成测试需显式配置 `TEST_DATABASE_URL`，使用临时 schema
 新仓库不包含任何原数据库、管理员、供应商密钥、知识库文件或聊天记录。历史 SQL 迁移用于保留约束及迁移顺序，不应逐份重写；业务内置资源已由后续迁移退出运行界面。Phoenix 保留为可选私有追踪，默认关闭，不连接来源项目的实例。
 
 来源和上游许可见 [SOURCE.md](SOURCE.md)。
+
+项目代码采用 [MIT 许可](LICENSE)；`admin-vben/` 等第三方内容保留各自的许可与来源说明。

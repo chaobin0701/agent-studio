@@ -957,7 +957,26 @@ export class ModelManagementService implements OnModuleInit {
           ...d.config,
           baseUrl: d.baseUrl,
         });
-        const e = (
+        // Imported drafts may already have a profile referenced by a knowledge base.
+        // Keep its identity, but never overwrite a different vector space or account.
+        const existing = (
+          await c.query<{ id: number; config: unknown; model_account_id: number | null }>(
+            "SELECT id::int,config,model_account_id::int FROM embedding_profiles WHERE model_plan_version_id=$1 FOR UPDATE",
+            [id],
+          )
+        ).rows[0];
+        if (existing) {
+          const previous = embeddingProfileSchema.safeParse(existing.config);
+          if (
+            !previous.success ||
+            existing.model_account_id !== d.accountId ||
+            embeddingFingerprint(previous.data) !== embeddingFingerprint(config)
+          )
+            throw new ConflictException(
+              "该版本已有不同的向量配置，请新建草稿版本后发布，以保留知识库原有的向量空间和账户关联",
+            );
+        }
+        const e = existing ?? (
           await c.query(
             "INSERT INTO embedding_profiles(name,platform_key,config,model_account_id,model_plan_version_id) VALUES($1,$2,$3,$4,$5) RETURNING id::int",
             [
@@ -969,13 +988,15 @@ export class ModelManagementService implements OnModuleInit {
             ],
           )
         ).rows[0];
-        await c.query("UPDATE embedding_profiles SET config=$2 WHERE id=$1", [
+        await c.query("UPDATE embedding_profiles SET config=$2,name=$3,platform_key=$4,enabled=true,updated_at=now() WHERE id=$1", [
           e.id,
           JSON.stringify({
             ...config,
             profileId: e.id,
             fingerprint: embeddingFingerprint(config),
           }),
+          `${v.name} · v${v.version}`,
+          a.platform_key,
         ]);
       }
       await c.query(

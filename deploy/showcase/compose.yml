@@ -1,0 +1,96 @@
+name: agent-studio-showcase
+services:
+  postgres:
+    image: pgvector/pgvector:pg17
+    environment:
+      POSTGRES_DB: agent_studio
+      POSTGRES_USER: agentstudio
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agentstudio -d agent_studio"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    mem_limit: 256m
+    restart: unless-stopped
+
+  migrate:
+    image: agent-studio-server:${RELEASE_TAG:?Set RELEASE_TAG in .env}
+    env_file: ./platform.env
+    command: ["npm", "run", "db:migrate"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    image: agent-studio-server:${RELEASE_TAG:?Set RELEASE_TAG in .env}
+    env_file: ./platform.env
+    volumes:
+      - ./data/uploads:/data/uploads
+    ports:
+      - "127.0.0.1:13020:3020"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3020/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    mem_limit: 448m
+    restart: unless-stopped
+
+  worker:
+    image: agent-studio-server:${RELEASE_TAG:?Set RELEASE_TAG in .env}
+    env_file: ./platform.env
+    command: ["node", "dist/worker.js"]
+    volumes:
+      - ./data/uploads:/data/uploads
+    depends_on:
+      api:
+        condition: service_healthy
+    profiles: [worker]
+    mem_limit: 384m
+    restart: unless-stopped
+
+  hub:
+    image: demo-hub:${RELEASE_TAG:?Set RELEASE_TAG in .env}
+    env_file: ./hub.env
+    volumes:
+      - ./data/hub:/data/hub
+    ports:
+      - "127.0.0.1:13300:3300"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3300/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    mem_limit: 448m
+    restart: unless-stopped
+
+  edge:
+    image: agent-studio-edge:${RELEASE_TAG:?Set RELEASE_TAG in .env}
+    environment:
+      WEBSITE_DOMAIN: ${WEBSITE_DOMAIN:?Set WEBSITE_DOMAIN in .env}
+      ADMIN_DOMAIN: ${ADMIN_DOMAIN:?Set ADMIN_DOMAIN in .env}
+    volumes:
+      - ./data/caddy:/data
+      - ./data/caddy-config:/config
+    ports:
+      - "${EDGE_BIND_IP:-127.0.0.1}:${EDGE_HTTP_PORT:-18080}:80"
+      - "${EDGE_BIND_IP:-127.0.0.1}:${EDGE_HTTPS_PORT:-18443}:443"
+    networks:
+      default:
+        aliases:
+          - ${WEBSITE_DOMAIN:?Set WEBSITE_DOMAIN in .env}
+          - ${ADMIN_DOMAIN:?Set ADMIN_DOMAIN in .env}
+    depends_on:
+      api:
+        condition: service_healthy
+      hub:
+        condition: service_healthy
+    mem_limit: 128m
+    restart: unless-stopped
