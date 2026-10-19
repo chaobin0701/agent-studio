@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily Agent Studio backup at 03:45 Shanghai time
+
+[Timer]
+OnCalendar=*-*-* 03:45:00 Asia/Shanghai
+Persistent=true
+RandomizedDelaySec=300
+Unit=agent-studio-backup.service
+
+[Install]
+WantedBy=timers.target

@@ -16,8 +16,10 @@ ENV NODE_ENV=production
 RUN mkdir -p /data/uploads && chown -R node:node /app /data/uploads
 COPY --from=build --chown=node:node /app/server/package*.json ./
 COPY --from=build --chown=node:node /app/server/node_modules ./node_modules
+COPY --from=build --chown=node:node /app/packages/output-contract /app/packages/output-contract
 COPY --from=build --chown=node:node /app/server/dist ./dist
 COPY --from=build --chown=node:node /app/server/config ./config
 COPY --from=build --chown=node:node /app/server/migrations ./migrations
+RUN ln -s /app/server/node_modules /app/packages/output-contract/node_modules
 USER node
 CMD ["node", "dist/main.js"]

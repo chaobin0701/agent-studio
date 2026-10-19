@@ -50,6 +50,8 @@ PostgreSQL 集成测试需显式配置 `TEST_DATABASE_URL`，使用临时 schema
 
 `docker compose -f compose.production.yml up -d --build`。首次部署前生成并审查本地 `.env`，将 `ALLOWED_ORIGINS` 改为实际入口地址、`TRUST_PROXY=1`（仅置于可信反向代理之后）。默认 ingress 仅绑定 `127.0.0.1:8075`，API / Worker / PostgreSQL 不直接对外暴露。
 
+Agent Studio 与独立 Demo Hub 同机部署的生产实例、备份与回滚操作见 [展示环境手册](deploy/showcase/README.md)。
+
 首次生产部署后，使用 `docker compose -f compose.production.yml exec api npm run admin:bootstrap` 创建管理员；不复用开发库的管理员。
 
 新仓库不包含任何原数据库、管理员、供应商密钥、知识库文件或聊天记录。历史 SQL 迁移用于保留约束及迁移顺序，不应逐份重写；业务内置资源已由后续迁移退出运行界面。Phoenix 保留为可选私有追踪，默认关闭，不连接来源项目的实例。
