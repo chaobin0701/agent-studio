@@ -38,10 +38,13 @@ import { ExecutionArtifactService } from "../artifacts/execution-artifact.servic
 import type { PendingFileOutput } from "../artifacts/file-output";
 import {
   pinnedTaskInput,
+  parseRunRequest,
   runFingerprint,
   type PublicRunResult,
   type RunRequest,
 } from "./run-request";
+import { InteractionService } from "../interactions/interaction.service";
+import { InteractionSuspension, InteractionWaiting, type JsonObject, type RuntimeInteractionHost } from "../interactions/contracts";
 
 type RunIdentity =
   | { app: IntegrationApp; adminActorId?: never }
@@ -55,6 +58,8 @@ export type PreparedRun = {
   input: RunRequest;
   composition: CompositionSnapshot;
   admission: Awaited<ReturnType<IntegrationService["admitRun"]>>;
+  traceId?: string;
+  interactionHost?: RuntimeInteractionHost;
   /** Trusted conversational inputs; deliberately excluded from task/Trace state. */
   chatContext?: Pick<
     Parameters<AgentExecutionService["runTask"]>[2],
@@ -73,6 +78,7 @@ export class AgentRunService {
     private readonly access: IntegrationService,
     private readonly tracing: ExecutionTracingService,
     @Optional() private readonly artifacts?: ExecutionArtifactService,
+    @Optional() private readonly interactions?: InteractionService,
   ) {}
 
   assertAgent(identity: IntegrationIdentity, agentId: number) {
@@ -217,7 +223,7 @@ export class AgentRunService {
       return this.publicResult(prepared.admission.cached as PublicRunResult);
     const { identity, input, composition, admission } = prepared;
     const runId = admission.callId,
-      traceId = randomUUID(),
+      traceId = prepared.traceId ?? randomUUID(),
       started = Date.now();
     const task = pinnedTaskInput(composition, input, runId, traceId);
     if (prepared.chatContext)
@@ -240,6 +246,14 @@ export class AgentRunService {
       );
       if (!assigned.rowCount)
         throw new ConflictException("当前执行已结束，请使用新的请求 ID");
+      const interactionHost = prepared.interactionHost ?? (this.interactions && composition.mode==="single" && !composition.previewDraft && prepared.entryPoint!=="agent_preview" ? await this.interactions.createHost(runId, {
+        traceId,
+        agentId:composition.agentId,
+        agentVersionId:composition.entryVersionId,
+        memoryScope:agentMemoryScope(composition),
+        input:JSON.parse(JSON.stringify(input)),
+        entryPoint:prepared.entryPoint ?? "generic_run",
+      }) : undefined);
       return await this.tracing.span(
         "agent_request",
         "chain",
@@ -264,6 +278,7 @@ export class AgentRunService {
                     traceId,
                     signal,
                     evidence,
+                    interactionHost,
                     ...prepared.chatContext,
                     validateDocument: async (reference, currentSignal) => {
                       currentSignal.throwIfAborted();
@@ -317,8 +332,11 @@ export class AgentRunService {
               signal,
             );
             phase = "accounting";
-            return (await this.access.finish(admission.callId, response))!;
+            const completed = (await this.access.finish(admission.callId, response))!;
+            await this.interactions?.complete(runId).catch(()=>this.logger.warn("Could not purge completed native checkpoint"));
+            return completed;
           } catch (error) {
+            if(error instanceof InteractionSuspension || error instanceof InteractionWaiting) throw error;
             annotateExecution({
               status: "failed",
               errorCode: this.errorCode(error, signal),
@@ -328,6 +346,13 @@ export class AgentRunService {
         },
       );
     } catch (error) {
+      if(error instanceof InteractionWaiting) throw error;
+      if(error instanceof InteractionSuspension && this.interactions) {
+        let interaction;
+        try { interaction=await this.interactions.saveWaiting(runId,traceId,error,async(c,expiresAt)=>{await this.access.pause(runId,c);await c.query("UPDATE integration_calls SET expires_at=LEAST(expires_at,$2::timestamptz) WHERE id=$1 AND status='waiting'",[runId,expiresAt]);}); }
+        catch(storageError) { error=storageError; }
+        if(interaction) throw new InteractionWaiting(interaction);
+      }
       const normalized = publicIntegrationError(error);
       const code = this.errorCode(error, signal);
       await this.persist(
@@ -357,6 +382,7 @@ export class AgentRunService {
           this.logger.warn("Failed to retract execution file outputs"),
         );
       await this.access.finish(admission.callId, null);
+      await this.interactions?.cancel(runId).catch(()=>this.logger.warn("Could not purge failed native checkpoint"));
       throw new HttpException({ ...normalized, code }, normalized.status);
     }
   }
@@ -364,6 +390,63 @@ export class AgentRunService {
   async cancelAdmission(prepared: PreparedRun) {
     if (prepared.admission.callId)
       await this.access.finish(prepared.admission.callId, null);
+    if(prepared.admission.callId) await this.interactions?.cancel(prepared.admission.callId);
+  }
+
+  /** The caller edge has already authorized its session; recheck the ledger's
+   * immutable principal as well before opening any private checkpoint. */
+  async prepareResumeForChatbot(principal:ChatbotExecutionPrincipal,runId:string,value:unknown,chatContext?:PreparedRun["chatContext"]) {
+    const row=(await this.database.query<{id:string}>(
+      "SELECT id FROM integration_calls WHERE id=$1 AND admin_actor_id IS NOT DISTINCT FROM $2::bigint AND app_id IS NOT DISTINCT FROM $3::uuid AND visitor_session_id IS NOT DISTINCT FROM $4::uuid",
+      [runId,"adminId" in principal?principal.adminId:null,"adminId" in principal?null:principal.identity.app.id,"adminId" in principal?null:principal.owner],
+    )).rows[0];
+    if(!row) throw new NotFoundException("执行记录不存在");
+    const prepared=await this.resumePrepared(runId,value,"adminId" in principal?{app:null,adminActorId:principal.adminId}:{app:principal.identity.app},"chatbot");
+    if(prepared.prepared) {
+      if(prepared.prepared.entryPoint!=="chatbot") throw new ForbiddenException("此执行不属于会话入口");
+      prepared.prepared.chatContext=chatContext;
+    }
+    return prepared;
+  }
+
+  async prepareResume(identity:IntegrationIdentity,agentId:number,runId:string,value:unknown,userId?:string) {
+    this.assertAgent(identity,agentId);
+    this.access.assertScope(identity,"chat:write");
+    const owner=await this.access.platformOwner(identity,userId);
+    const app=await this.access.app(identity.app.id);
+    if(!app.enabled||!app.apiEnabled||app.authVersion!==identity.app.authVersion||app.agentId!==agentId) throw new ForbiddenException("接入授权已更新或停用");
+    if(!(await this.database.query("SELECT id FROM integration_calls WHERE id=$1 AND app_id=$2 AND visitor_session_id=$3 AND conversation_id IS NULL AND admin_actor_id IS NULL",[runId,app.id,owner])).rowCount) throw new NotFoundException("执行记录不存在");
+    const result=await this.resumePrepared(runId,value,{app},"generic_run");
+    if(result.prepared && result.prepared.entryPoint) throw new ForbiddenException("请通过原来的会话入口恢复执行");
+    return result;
+  }
+
+  private async resumePrepared(runId:string,value:unknown,identity:RunIdentity,entryPoint:"chatbot"|"generic_run"|"agent_preview") {
+    if(!this.interactions) throw new ConflictException("交互服务不可用");
+    const thread=await this.interactions.thread(runId);
+    const stored=thread.host_input;
+    if(thread.status!=="completed" && thread.status!=="cancelled" && stored.entryPoint!==entryPoint) throw new ForbiddenException("请通过原来的会话入口恢复执行");
+    // Respond replay still goes through ownership above, but must not recreate
+    // or revalidate a now-completed task whose private checkpoints were purged.
+    if(thread.status==="completed" || thread.status==="cancelled") {
+      const resolution=await this.interactions.respond(runId,value);
+      return {runId,replayed:resolution.replayed,interaction:resolution.interaction,prepared:undefined};
+    }
+    if(typeof stored.agentId!=="number" || typeof stored.agentVersionId!=="number" || typeof stored.traceId!=="string") throw new ConflictException("原执行上下文不完整");
+    const composition=await this.management.snapshotPinned(stored.agentId,stored.agentVersionId);
+    if(composition.mode!=="single" || agentMemoryScope(composition)!==stored.memoryScope) throw new ConflictException("原执行的已发布资源已变化，无法安全继续");
+    if(identity.app && identity.app.agentId!==composition.agentId) throw new ForbiddenException("当前应用没有原 Agent 的执行权限");
+    const input=parseRunRequest(stored.input);
+    await this.attachments(input,composition);
+    const resolution=await this.interactions.respond(runId,value,c=>this.access.resume(runId,c));
+    const prepared:PreparedRun|undefined=resolution.replayed?undefined:{
+      identity,input,composition,
+      admission:{cached:null,callId:runId as ReturnType<typeof randomUUID>,conversationId:null,clientRequestId:"interaction-resume"},
+      traceId:stored.traceId,
+      interactionHost:resolution.host,
+      ...(stored.entryPoint==="chatbot"?{entryPoint:"chatbot" as const}:{}),
+    };
+    return {runId,replayed:resolution.replayed,interaction:resolution.interaction,prepared};
   }
 
   private errorCode(error: unknown, signal?: AbortSignal): string {
@@ -412,18 +495,20 @@ export class AgentRunService {
         response: PublicRunResult | null;
         errorCode: string | null;
       }>(
-        `SELECT c.run_id AS "runId",c.trace_id AS "traceId",CASE WHEN c.status='running' AND c.expires_at<=now() THEN 'expired' ELSE c.status END AS status,c.response,t.error_code AS "errorCode"
+        `SELECT c.run_id AS "runId",c.trace_id AS "traceId",CASE WHEN c.status IN ('running','waiting') AND c.expires_at<=now() THEN 'expired' ELSE c.status END AS status,c.response,t.error_code AS "errorCode"
        FROM integration_calls c LEFT JOIN chat_traces t ON t.id=c.trace_id WHERE c.app_id=$1 AND c.visitor_session_id=$2 AND c.run_id=$3 AND c.conversation_id IS NULL`,
         [identity.app.id, owner, runId],
       )
     ).rows[0];
     if (!row) throw new NotFoundException("执行记录不存在");
+    const interactions=await this.interactions?.list(runId)??[];
     return row.response
-      ? this.publicResult(row.response)
+      ? {...this.publicResult(row.response),...(interactions.length?{interactions}:{})}
       : {
           runId: row.runId,
           traceId: row.traceId,
           status: row.status,
+          ...(interactions.length?{interactions}:{}),
           ...(row.errorCode ? { errorCode: row.errorCode } : {}),
         };
   }

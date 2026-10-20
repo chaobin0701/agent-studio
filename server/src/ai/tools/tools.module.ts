@@ -8,6 +8,7 @@ import { ToolPolicy } from "./tool-policy";
 import { ToolRegistry } from "./tool-registry";
 import { SkillsModule } from "../skills/skills.module";
 import { LoadSkillTool } from "./load-skill.tool";
+import { AskUserTool } from "./ask-user.tool";
 import { SpecializedWorkflowRegistry } from "../workflows/specialized-workflow";
 import { textStatistics } from "../workflows/text-statistics";
 import { textSummary } from "../workflows/text-summary";
@@ -17,6 +18,7 @@ import { textSummary } from "../workflows/text-summary";
   providers: [
     KnowledgeSearchTool,
     LoadSkillTool,
+    AskUserTool,
     ToolPolicy,
     ToolExecutionService,
     ToolRegistry,
@@ -30,12 +32,13 @@ export class ToolsModule implements OnModuleInit {
     private readonly knowledgeSearch: KnowledgeSearchTool,
     private readonly loadSkill: LoadSkillTool,
     private readonly workflows: SpecializedWorkflowRegistry,
+    private readonly askUser: AskUserTool = new AskUserTool(),
   ) {}
 
   onModuleInit(): void {
     this.workflows.register(textStatistics);
     this.workflows.register(textSummary);
-    const tools: AgentTool[] = [this.knowledgeSearch, this.loadSkill];
+    const tools: AgentTool[] = [this.knowledgeSearch, this.loadSkill, this.askUser];
     tools.push(...this.workflows.tools());
     for (const tool of tools) this.registry.register(tool);
   }

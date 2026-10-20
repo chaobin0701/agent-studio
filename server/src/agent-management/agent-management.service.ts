@@ -23,6 +23,7 @@ import { exportSkillDocument, parseSkillDocument, skillDocumentDiagnostics, norm
 import { skillResourcesSchema } from './skill-resources';
 import { publishedSkillFiles } from '../ai/deep-agents/run-workspace';
 import type { SkillDefinition } from '../ai/skills/skill.types';
+import { questionSchema } from '../ai/tools/ask-user.tool';
 
 import { lifecycleWriteLock, resourceState, statePredicate, resourceReferences, changeResourceLifecycle, type ResourceState, type LifecycleKind } from './resource-lifecycle';
 
@@ -385,17 +386,28 @@ export class AgentManagementService {
   const signature=await this.signature(this.db,v);
   let result:any={ok:true,validationOnly:true};
   if(v.kind==='tool') {
-   if(!input.execute) throw new BadRequestException('工具发布前必须执行测试，调用当前配置的真实服务');
+   if(!input.execute) throw new BadRequestException('工具发布前必须显式执行测试；普通工具会调用当前配置的真实服务');
    const privilege=(await workspaceAccess(this.db,actor,currentWorkspaceId())).permissionCodes.includes('agent_tools.execute');
    if(!privilege) throw new BadRequestException('缺少工具执行测试权限');
    const tool=await this.managedTool(v);
    const parsed=tool.inputSchema.safeParse(input.input);
    if(!parsed.success) throw new BadRequestException('工具测试参数未通过 Schema 校验');
+   // This administrative test exercises the question adapter's real contract;
+   // it does not create a visitor interaction or grant a production answer.
+   // Capability comes from registered code, never a caller-supplied flag.
+   const interactionContract=tool.capabilities?.includes('human-question')===true;
+   const question=interactionContract?questionSchema.parse(parsed.data):undefined;
+   const example=question?.options[0];
+   const interactionAnswer=question?{toolCallId:`management-test-${id}`,
+    text:example?.label??'管理测试示例回答',...(example?{optionId:example.id}:{})}:undefined;
    const started=Date.now();
    const signal=AbortSignal.timeout(v.config.timeoutMs);
    let timeout:ReturnType<typeof setTimeout>|undefined;
-   const execution=await Promise.race([tool.execute(parsed.data,{signal,traceId:`test-${id}-${Date.now()}`,permissions:[v.key],enabledSkillIds:[],approvedTools:input.approved?[v.key]:[],state:new Map()}),new Promise<never>((_,reject)=>{timeout=setTimeout(()=>reject(new Error('Tool test timed out')),v.config.timeoutMs);})]).finally(()=>clearTimeout(timeout)).catch(()=>({success:false,errorCode:'tool_test_failed',content:'执行测试失败，请检查服务连接'}));
-   result={ok:execution.success,errorCode:execution.errorCode??null,durationMs:Date.now()-started,content:execution.content.slice(0,4000),...('metadata' in execution?{metadata:execution.metadata}:{})};
+   const execution=await Promise.race([tool.execute(parsed.data,{signal,traceId:`test-${id}-${Date.now()}`,permissions:[v.key],enabledSkillIds:[],approvedTools:input.approved?[v.key]:[],state:new Map(),...(interactionAnswer?{interactionAnswer}:{})}),new Promise<never>((_,reject)=>{timeout=setTimeout(()=>reject(new Error('Tool test timed out')),v.config.timeoutMs);})]).finally(()=>clearTimeout(timeout)).catch(()=>({success:false,errorCode:'tool_test_failed',content:'执行测试失败，请检查服务连接'}));
+   result={ok:execution.success,errorCode:execution.errorCode??null,durationMs:Date.now()-started,content:execution.content.slice(0,4000),...('metadata' in execution?{metadata:execution.metadata}:{}),...(interactionContract?{
+    testMode:'interaction_contract',simulatedInteraction:true,
+    message:execution.success?'补充信息交互契约验证通过；已使用服务端样例回答，未创建真实用户交互。':'补充信息交互契约验证未通过；样例回答不会绕过工具审批。',
+   }:{})};
   }
   await this.recordToolTest(actor,v,signature,result);
   return result;
@@ -497,13 +509,18 @@ export class AgentManagementService {
   agentId=agentId??invocation?.agentId;
   return this.buildSnapshot(agentId);
  }
+ /** Resume only the original published Agent; never follow a newer activation. */
+ async snapshotPinned(agentId:number,versionId:number):Promise<CompositionSnapshot> {
+  if(![agentId,versionId].every(v=>Number.isSafeInteger(v)&&v>0))throw new BadRequestException('发布版本标识无效');
+  return this.buildSnapshot(agentId,undefined,versionId);
+ }
  /** Administrative preview only. Public Run/Chat keep using published snapshots.
   * The revision is mandatory, dependencies remain published, and no resource is activated. */
  async draftSnapshot(agentId:number,versionId:number,revision:number):Promise<CompositionSnapshot> {
   if(![agentId,versionId,revision].every(v=>Number.isSafeInteger(v)&&v>0))throw new BadRequestException('草稿标识无效');
   return this.buildSnapshot(agentId,{versionId,revision});
  }
- private async buildSnapshot(agentId?:number,previewDraft?:{versionId:number;revision:number}):Promise<CompositionSnapshot> {
+ private async buildSnapshot(agentId?:number,previewDraft?:{versionId:number;revision:number},pinnedVersionId?:number):Promise<CompositionSnapshot> {
   return this.db.transaction(async c=> {
    await c.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ');
    const basePrompts=await this.prompts.snapshot(undefined,c); // No internal Key reads; metadata only.
@@ -514,7 +531,8 @@ export class AgentManagementService {
    }
    const binding=(await c.query("SELECT 'single' AS mode,current_version_id::int AS id FROM agent_resources WHERE id=$1 AND kind='agent' AND enabled AND archived_at IS NULL AND deleted_at IS NULL",[agentId])).rows[0];
    if(!binding || (!binding.id&&!previewDraft)) throw new ConflictException('此 Agent 没有生效的已发布版本或已停用');
-   const entry=await this.version(c,previewDraft?.versionId??binding.id,'agent',!previewDraft);
+   const entry=await this.version(c,previewDraft?.versionId??pinnedVersionId??binding.id,'agent',!previewDraft);
+   if(entry.resourceId!==agentId)throw new ConflictException('发布版本不属于此 Agent');
    if(previewDraft&&(entry.resourceId!==agentId||entry.status!=='draft'||entry.revision!==previewDraft.revision))throw new ConflictException('草稿已变化或不属于此 Agent，请重新保存并试运行');
    const entrySpec=this.parse(schemas.agent,entry.config);
    const plan:CollaborationSpec|undefined=entrySpec.collaboration?{

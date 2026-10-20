@@ -231,6 +231,7 @@ export class ChatOrchestratorService {
       if (runContext) runContext.partialAnswer = text;
     };
     const input: AgentInput = {
+      interactionHost:agentContext?.interactionHost,
       question,
       signal: agentContext?.signal,
       configurationSnapshot,

@@ -92,6 +92,10 @@ onBeforeUnmount(() => {
     :images-enabled="!!agent?.supportsImages"
     :image-input-reason="agent?.imageInputReason"
     :busy="!!buffer.runId"
+    :waiting="buffer.runStatus === 'waiting'"
+    :active-run-id="buffer.runId"
+    :interaction-responding-id="buffer.respondingId"
+    :interaction-errors="buffer.interactionErrors"
     :loading="client.state.loading || buffer.loading || client.state.creating"
     :disabled="!client.state.ready || !agent || !!buffer.pending"
     :error="buffer.error || client.state.error"
@@ -125,6 +129,8 @@ onBeforeUnmount(() => {
     @remove-attachment="client.removeAttachment"
     @download="client.download"
     @inspect="$emit('inspect', $event)"
+    @respond="client.respond"
+    @cancel-interaction="client.cancel"
   >
     <template #header
       ><ElSelect

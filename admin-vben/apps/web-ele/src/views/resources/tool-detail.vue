@@ -60,6 +60,9 @@ const tested = computed(
     !props.dirty,
 );
 const locked = computed(() => props.busy || props.saveState.saving);
+const questionTool = computed(
+  () => config.value.type === "builtin" && config.value.target === "ask_user",
+);
 const comparison = computed(
   () =>
     props.detail.versions.find((v: any) => v.id === comparisonId.value) ??
@@ -88,7 +91,9 @@ const status = computed(() =>
     <div class="flex flex-wrap items-center justify-between gap-3">
       <div class="flex flex-wrap items-center gap-3" aria-live="polite">
         <ElTag :type="editable ? 'warning' : 'success'">{{ status }}</ElTag>
-        <ElTag v-if="tested" type="success">当前配置已通过真实测试</ElTag>
+        <ElTag v-if="tested" type="success">{{
+          questionTool ? "交互契约已验证（样例回答）" : "当前配置已通过真实测试"
+        }}</ElTag>
       </div>
       <div class="flex flex-wrap items-center gap-2">
         <ElButton :disabled="locked" @click="historyOpen = true"
@@ -104,7 +109,7 @@ const status = computed(() =>
           v-if="editable && canExecute"
           :disabled="busy || saveState.conflict || !contentValid"
           @click="emit('test')"
-          >真实调用测试</ElButton
+          >{{ questionTool ? "交互契约测试" : "真实调用测试" }}</ElButton
         >
         <ElButton
           v-if="editable"
@@ -153,7 +158,9 @@ const status = computed(() =>
       :closable="false"
       :title="
         result.ok
-          ? '真实测试通过'
+          ? questionTool
+            ? '交互契约验证通过（样例回答）'
+            : '真实测试通过'
           : `测试失败：${result.errorCode ?? '请检查配置'}`
       "
     />

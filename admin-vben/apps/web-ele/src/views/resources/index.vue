@@ -51,6 +51,7 @@ import HelpTip from "#/components/HelpTip.vue";
 import JsonEditor from "#/components/JsonEditor.vue";
 import { createSkillDocument, skillCreateKey } from "./skill/create-document";
 import { skillResourceLimits, type SkillResource } from "./skill/resources";
+import { httpToolConfig, toolTestExample } from "../tools/create-config";
 const SkillDetail = defineAsyncComponent(() => import("./skill/detail.vue"));
 const skillDetail = ref<{ prepareLeave: () => Promise<boolean> }>();
 const workflowTestOpen = ref(false);
@@ -130,6 +131,13 @@ const saveState = ref<DraftSaveState>({
 });
 const toolContentValid = ref(true);
 const toolTestValid = ref(true);
+const toolTestVersion = ref<number>();
+const questionToolTest = computed(
+  () =>
+    kind.value === "tool" &&
+    config.value.type === "builtin" &&
+    config.value.target === "ask_user",
+);
 const generatedCreateKey = ref("");
 const skillCreateRules = {
   name: [
@@ -205,28 +213,7 @@ function defaults() {
       allowedKnowledgeBaseIds: [],
       permissionMode: "agent",
     };
-  if (kind.value === "tool")
-    return {
-      description: "",
-      type: "rest",
-      endpoint: {
-        url: "",
-        method: "GET",
-        headers: {},
-        mappingMode: "explicit",
-        bindings: [],
-        resultPath: "",
-      },
-      parameters: {
-        type: "object",
-        properties: {},
-        additionalProperties: false,
-      },
-      timeoutMs: 30000,
-      maxRetries: 3,
-      readOnly: true,
-      requiresApproval: false,
-    };
+  if (kind.value === "tool") return httpToolConfig();
   return {
     responsibility: "",
     output: { mode: "text" },
@@ -619,6 +606,18 @@ async function openToolTest() {
   const workflow = options.value.tools.find(
     (tool: any) => tool.key === active.value?.config.target,
   )?.workflow;
+  if (
+    toolTestVersion.value !== selected.value ||
+    testInput.value.trim() === "{}"
+  ) {
+    testInput.value = JSON.stringify(
+      toolTestExample(active.value?.config ?? {}),
+      null,
+      2,
+    );
+    toolTestVersion.value = selected.value;
+    toolTestValid.value = true;
+  }
   if (active.value?.config.type === "builtin" && workflow?.requiresAgentContext)
     workflowTestOpen.value = true;
   else testOpen.value = true;
@@ -647,7 +646,9 @@ async function test(execute = false) {
     }
     try {
       await ElMessageBox.confirm(
-        "此操作将真实调用工具，是否继续？",
+        questionToolTest.value
+          ? "验证提问参数与服务端样例回答的交互契约，是否继续？"
+          : "此操作将真实调用工具，是否继续？",
         "工具测试",
       );
     } catch {
@@ -1193,6 +1194,7 @@ watch(
             :key="`${selected}:${active?.status}`"
             v-model="config"
             :kind="kind"
+            creating
             :section="
               kind === 'agent'
                 ? 'basic'
@@ -1356,11 +1358,15 @@ watch(
       footer-class="management-dialog-footer"
       append-to-body
       v-model="testOpen"
-      title="真实工具测试"
+      :title="questionToolTest ? '补充信息工具测试' : '真实工具测试'"
       width="600"
       ><ElAlert
-        title="执行已保存版本，可能产生外部副作用。"
-        type="warning"
+        :title="
+          questionToolTest
+            ? '验证交互契约，使用服务端样例回答。'
+            : '执行已保存版本，可能产生外部副作用。'
+        "
+        :type="questionToolTest ? 'info' : 'warning'"
         :closable="false"
       /><JsonEditor
         v-model="testInput"
@@ -1373,7 +1379,7 @@ watch(
           type="primary"
           :disabled="busy || !toolTestValid"
           @click="test(true)"
-          >确认执行</ElButton
+          >{{ questionToolTest ? "验证交互契约" : "确认执行" }}</ElButton
         ></template
       ></ElDialog
     >

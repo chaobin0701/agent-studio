@@ -20,6 +20,7 @@ import {
   frameworkParent,
   type FrameworkCapture,
 } from "./framework-callbacks";
+import { InteractionSuspension, InteractionWaiting } from "../interactions/contracts";
 
 export type TraceMetadata = Record<string, unknown>;
 export type TraceKind = "chain" | "llm" | "tool" | "retriever" | "embedding";
@@ -324,6 +325,13 @@ export class PhoenixExecutionTracer implements ExecutionTracer {
       this.finish(live, "completed");
       return result;
     } catch (error) {
+      // Human interaction is a successful control-flow boundary. Only trusted
+      // platform classes qualify; an external tool's matching code is no grant.
+      // Never inspect/export the request, checkpoint or private continuation.
+      if (error instanceof InteractionSuspension || error instanceof InteractionWaiting) {
+        this.finish(live, "waiting");
+        throw error;
+      }
       const record =
         error && typeof error === "object"
           ? (error as { code?: unknown; errorCode?: unknown })

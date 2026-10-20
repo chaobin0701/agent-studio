@@ -64,6 +64,8 @@ import {
   PromptRuntimeService,
   type PromptRuntimeSnapshot,
 } from "../prompts/prompt-runtime.service";
+import { InteractionService } from "../interactions/interaction.service";
+import { InteractionSuspension, type JsonObject,type PublicInteraction } from "../interactions/contracts";
 
 const COOKIE_NAME = "agent_studio_visitor";
 const COOKIE_AGE_MS = 180 * 24 * 60 * 60 * 1000;
@@ -80,6 +82,7 @@ type ConversationRow = {
   updatedAt: string;
 };
 type MessageRow = {
+  interactions?:PublicInteraction[];
   artifacts?: ChatAnswer["artifacts"];
   id: number;
   role: "user" | "assistant";
@@ -94,6 +97,7 @@ type MessageRow = {
 type RunStatus =
   | "queued"
   | "running"
+  | "waiting"
   | "completed"
   | "failed"
   | "interrupted"
@@ -108,6 +112,7 @@ type RunRow = {
   userMessageId: number | null;
   assistantMessageId: number | null;
   context?: RequestContext;
+  integrationCallId?:string|null;
 };
 
 function clientType(request: Request): string {
@@ -137,6 +142,7 @@ export class ConversationService {
     @Optional() private readonly agentManagement?: AgentManagementService,
     @Optional() private readonly tracing?: ExecutionTracingService,
     @Optional() private readonly artifacts?: ExecutionArtifactService,
+    @Optional() private readonly interactions?:InteractionService,
   ) {}
 
   async session(request: Request, response: Response): Promise<string> {
@@ -292,7 +298,11 @@ export class ConversationService {
        FROM conversation_messages WHERE conversation_id = $1 ORDER BY id ASC`,
       [id],
     );
-    return result.rows;
+    if(!this.interactions)return result.rows;
+    const linked=(await this.database.query<{messageId:number;callId:string}>("SELECT assistant_message_id::int AS \"messageId\",integration_call_id AS \"callId\" FROM conversation_runs WHERE conversation_id=$1 AND assistant_message_id IS NOT NULL AND integration_call_id IS NOT NULL",[id])).rows;
+    const cards=await this.interactions.listMany(linked.map(row=>row.callId));
+    const byMessage=new Map(linked.map(row=>[row.messageId,cards.get(row.callId)??[]]));
+    return result.rows.map(row=>({...row,interactions:byMessage.get(row.id)??[]}));
   }
 
   async context(ownerId: string, id: string) {
@@ -318,22 +328,26 @@ export class ConversationService {
     await this.expireRuns(ownerId, id);
     await this.get(ownerId, id);
     const result = await this.database.query<RunRow>(
-      `SELECT id, client_request_id AS "clientRequestId", question, request_context AS context, status,
-              expires_at AS "expiresAt", started_at AS "startedAt", finished_at AS "finishedAt",
-              error_code AS "errorCode", created_at AS "createdAt"
-       FROM conversation_runs WHERE conversation_id = $1
-       ORDER BY created_at DESC LIMIT $2`,
+      `SELECT r.id,r.client_request_id AS "clientRequestId",r.question,r.request_context AS context,
+              CASE WHEN r.status='expired' OR (c.status IN ('running','waiting') AND c.expires_at<=now()) THEN 'expired' WHEN c.status='waiting' THEN 'waiting' WHEN c.status IN ('failed','expired') THEN c.status ELSE r.status END AS status,
+              r.expires_at AS "expiresAt",r.started_at AS "startedAt",r.finished_at AS "finishedAt",
+              r.error_code AS "errorCode",r.created_at AS "createdAt",r.integration_call_id AS "integrationCallId",r.assistant_message_id::int AS "assistantMessageId"
+       FROM conversation_runs r LEFT JOIN integration_calls c ON c.id=r.integration_call_id WHERE r.conversation_id = $1
+       ORDER BY r.created_at DESC LIMIT $2`,
       [id, Math.max(1, Math.min(limit, 50))],
     );
-    return result.rows;
+    const cards=await this.interactions?.listMany(result.rows.flatMap(row=>row.integrationCallId?[row.integrationCallId]:[]));
+    return result.rows.map(row=>({...row,interactions:row.integrationCallId?cards?.get(row.integrationCallId)??[]:[]}));
   }
 
   async remove(ownerId: string, id: string): Promise<void> {
+    const calls=(await this.database.query<{id:string}>("SELECT r.integration_call_id AS id FROM conversation_runs r JOIN conversations c ON c.id=r.conversation_id WHERE c.id=$1 AND c.visitor_session_id=$2 AND r.status IN ('running','waiting') AND r.integration_call_id IS NOT NULL",[id,ownerId])).rows;
     const result = await this.database.query(
       "DELETE FROM conversations WHERE id = $1 AND visitor_session_id = $2",
       [id, ownerId],
     );
     if (!result.rowCount) throw new NotFoundException("Conversation not found");
+    for(const call of calls){await this.interactions?.cancel(call.id);await this.access?.finish(call.id,null);}
   }
 
   async ask(
@@ -386,6 +400,7 @@ export class ConversationService {
   ): Promise<ChatAnswer> {
     const requestContext = normalizeRequestContext(context, question);
     const clientRequestId = this.normalizeIdempotencyKey(idempotencyKey);
+    const resuming=Boolean(callbacks?.interactionHost?.resume);
     await this.expireRuns(ownerId, id);
     let previousRun: RunRow | null = null;
     if (clientRequestId) {
@@ -410,7 +425,7 @@ export class ConversationService {
         return this.resultForRun(previousRun);
       if (
         previousRun &&
-        (previousRun.status === "queued" || previousRun.status === "running")
+        (previousRun.status === "queued" || previousRun.status === "running" || (previousRun.status==="waiting"&&!resuming))
       ) {
         throw new ConflictException("Request is already being processed");
       }
@@ -424,11 +439,13 @@ export class ConversationService {
         );
       }
     }
+    if(resuming && previousRun?.status!=="waiting") throw new ConflictException("原会话任务不处于可恢复的等待状态");
     const lock = await this.database.query(
       `UPDATE conversations SET busy_until = now() + ${RUN_TIMEOUT_SQL}
        WHERE id = $1 AND visitor_session_id = $2 AND (busy_until IS NULL OR busy_until < now())
+         AND NOT EXISTS(SELECT 1 FROM conversation_runs r WHERE r.conversation_id=$1 AND r.status='waiting' AND r.expires_at>now() AND ($3::uuid IS NULL OR r.id<>$3))
        RETURNING id, busy_until::text AS "busyUntil"`,
-      [id, ownerId],
+      [id, ownerId,resuming?previousRun!.id:null],
     );
     if (!lock.rowCount) {
       await this.get(ownerId, id);
@@ -455,7 +472,11 @@ export class ConversationService {
     let runId: string | null = null;
     try {
       if (clientRequestId) {
-        if (previousRun?.status === "expired") {
+        if (resuming && previousRun?.status==="waiting") {
+          const resumed=await this.database.query<{id:string}>(`UPDATE conversation_runs SET status='running',finished_at=NULL,expires_at=now()+${RUN_TIMEOUT_SQL},error_code=NULL WHERE id=$1 AND status='waiting' AND integration_call_id=$2 RETURNING id`,[previousRun.id,callbacks?.integrationCallId]);
+          if(!resumed.rowCount) throw new ConflictException("原任务状态已变化，请刷新会话");
+          runId=resumed.rows[0].id;
+        } else if (previousRun?.status === "expired") {
           const resumed = await this.database.query<{ id: string }>(
             `UPDATE conversation_runs
              SET status = 'running', started_at = now(), finished_at = NULL,
@@ -469,14 +490,15 @@ export class ConversationService {
         } else {
           const created = await this.database.query<{ id: string }>(
             `INSERT INTO conversation_runs
-              (id, conversation_id, client_request_id, question, status, started_at, expires_at, request_context)
-             VALUES ($1, $2, $3, $4, 'running', now(), now() + ${RUN_TIMEOUT_SQL}, $5::jsonb) RETURNING id`,
+              (id, conversation_id, client_request_id, question, status, started_at, expires_at, request_context,integration_call_id)
+             VALUES ($1, $2, $3, $4, 'running', now(), now() + ${RUN_TIMEOUT_SQL}, $5::jsonb,$6) RETURNING id`,
             [
               randomUUID(),
               id,
               clientRequestId,
               question,
               JSON.stringify(requestContext),
+              callbacks?.integrationCallId??null,
             ],
           );
           runId = created.rows[0].id;
@@ -505,7 +527,7 @@ export class ConversationService {
       throw error;
     }
     const started = Date.now();
-    const traceId = randomUUID();
+    const traceId = callbacks?.executionTraceId??randomUUID();
     annotateExecution({ localRunId: runId, localTraceId: traceId });
     let snapshot: ConversationSnapshot | null = null;
     let contextSnapshot: Record<string, unknown> | null = null;
@@ -537,9 +559,11 @@ export class ConversationService {
           configurationSnapshot?.configuration,
           boundary,
         );
-      snapshot = await (entryAgent
-        ? this.llm.withPinnedModelPlan(entryAgent.modelPlan, readSnapshot)
-        : readSnapshot());
+      const savedSnapshot=callbacks?.interactionHost?.continuation?.execution?.legacyChatSnapshot;
+      snapshot = resuming && savedSnapshot
+        ? savedSnapshot as unknown as ConversationSnapshot
+        : await (entryAgent ? this.llm.withPinnedModelPlan(entryAgent.modelPlan, readSnapshot) : readSnapshot());
+      if(resuming && (!snapshot || snapshot.conversationId!==id))throw new ConflictException("原会话上下文不可用，不能重新执行任务");
       const run = await this.chat.askDetailed(
         question,
         snapshot.history,
@@ -562,6 +586,7 @@ export class ConversationService {
           promptSnapshot,
           requestContext,
           contextBlocks: snapshot.contextBlocks,
+          interactionHost:callbacks?.interactionHost,
         },
       );
       await this.saveResult(
@@ -589,6 +614,10 @@ export class ConversationService {
       ).catch(() => this.logger.warn("Conversation summary update failed"));
       return run.result;
     } catch (error) {
+      if(error instanceof InteractionSuspension && runId) {
+        await this.database.query("UPDATE conversation_runs SET status='waiting',expires_at=now()+interval '24 hours',finished_at=NULL WHERE id=$1 AND status='running'",[runId]);
+        throw new InteractionSuspension(error.request,error.interruptId,{...error.continuation,execution:{...error.continuation.execution,legacyChatSnapshot:JSON.parse(JSON.stringify(snapshot)) as JsonObject}});
+      }
       const failureBody =
         error instanceof HttpException ? error.getResponse() : null;
       const errorRecord =
@@ -895,7 +924,7 @@ export class ConversationService {
       `UPDATE conversation_runs r SET status = 'expired', finished_at = now(), error_code = 'request_expired'
        FROM conversations c
        WHERE r.conversation_id = c.id AND c.visitor_session_id = $1
-         ${filter} AND r.status IN ('queued', 'running') AND r.expires_at <= now()`,
+         ${filter} AND r.status IN ('queued', 'running','waiting') AND r.expires_at <= now()`,
       values,
     );
     if (conversationId) {

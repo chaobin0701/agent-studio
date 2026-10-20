@@ -22,6 +22,8 @@ export interface AgentTool<TInput = unknown> {
     source: "platform" | "builtin" | "http" | "mcp";
     toolVersionId?: number;
     mcpServerId?: number;
+    /** Trusted published policy. Runtime approval is bound to one native call. */
+    requiresApproval?: boolean;
     /** Immutable trusted specialized graph identity, not model-supplied routing. */
     workflow?: {
       key: string;

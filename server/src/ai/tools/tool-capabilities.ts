@@ -5,7 +5,8 @@
  */
 export type AgentToolCapability =
   | 'knowledge-search'
-  | 'skill';
+  | 'skill'
+  | 'human-question';
 
 export const TOOL_CAPABILITIES: Readonly<Record<string, readonly AgentToolCapability[]>> = Object.freeze({
   search_knowledge: ['knowledge-search'],

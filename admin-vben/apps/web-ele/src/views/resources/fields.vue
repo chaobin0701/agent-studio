@@ -24,6 +24,7 @@ const props = defineProps<{
   resources: any[];
   resourceId?: number;
   disabled?: boolean;
+  creating?: boolean;
   fullWidth?: boolean;
   section?:
     | "all"
@@ -696,6 +697,7 @@ function updateResources(kind: string, field: string, selected: number[]) {
       v-model="config"
       :options="options"
       :disabled="disabled"
+      :creating="creating"
       :section="section === 'connection' ? 'connection' : 'all'"
       @valid="emit('valid', $event)"
     />

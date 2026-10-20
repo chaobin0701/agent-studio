@@ -12,7 +12,7 @@ export type ChatbotTurn = {
   question: string;
   partialAnswer: string;
   progress: unknown[];
-  status: "running" | "completed" | "failed" | "cancelled" | "expired";
+  status: "running" | "waiting" | "completed" | "failed" | "cancelled" | "expired";
   response: PublicRunResult | null;
   errorCode: string | null;
   errorMessage: string | null;

@@ -40,6 +40,12 @@ export async function streamChatbot(
   };
   const complete = (turn: typeof initial) => {
     if (turn.status === "running") return false;
+    if(turn.status==="waiting") {
+      const interaction=turn.interactions.find(item=>item.status==="pending");
+      if(interaction) send("interaction_required",{runId,interaction});
+      close();
+      return true;
+    }
     if (turn.response) send("done", turn.response);
     else
       send("error", {
@@ -60,7 +66,7 @@ export async function streamChatbot(
   if (complete(initial)) return;
   unsubscribe = service.subscribe(runId, ({ event, data }) => {
     send(event, data);
-    if (event === "done" || event === "error") close();
+    if (event === "done" || event === "error" || event === "interaction_required") close();
   });
   timer = setInterval(() => {
     if (closed || polling) return;

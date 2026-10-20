@@ -1,6 +1,7 @@
 import type { Response } from "express";
 import type { AgentRunService } from "./agent-run.service";
 import { publicIntegrationError } from "../integrations/quota-error";
+import { InteractionWaiting } from "../interactions/contracts";
 
 /** Both public Runs and authenticated administrative previews use this wire
  * protocol. No native state, model reasoning or tool bodies cross this edge. */
@@ -11,10 +12,10 @@ export async function runResponse(
   transport: AbortController,
 ) {
   transport.signal.throwIfAborted();
-  if (!prepared.input.stream)
-    return response.json(
-      runs.publicResult(await runs.execute(prepared, transport.signal)),
-    );
+  if (!prepared.input.stream) {
+    try { return response.json(runs.publicResult(await runs.execute(prepared,transport.signal))); }
+    catch(error) { if(error instanceof InteractionWaiting) return response.status(202).json({runId:error.interaction.runId,status:"waiting",interaction:error.interaction,interactions:[error.interaction]});throw error; }
+  }
 
   response.setHeader("Content-Type", "text/event-stream; charset=utf-8");
   response.setHeader("Cache-Control", "no-store, no-cache, no-transform");
@@ -97,6 +98,7 @@ export async function runResponse(
     });
     send("done", runs.publicResult(result));
   } catch (error) {
+    if(error instanceof InteractionWaiting) { send("interaction_required",{runId:error.interaction.runId,interaction:error.interaction});return; }
     const failure = publicIntegrationError(error);
     send("error", { ...failure, code: failure.code ?? "execution_failed" });
   } finally {

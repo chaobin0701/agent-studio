@@ -666,7 +666,7 @@ export class IntegrationService implements OnModuleInit {
             clientRequestId: key,
           };
         throw new ConflictException(
-          old.status === "running"
+          old.status === "waiting" ? "请求正在等待用户回应，请恢复原会话" : old.status === "running"
             ? "请求正在执行，请恢复会话查看"
             : "此前请求未完成，请明确发起新请求",
         );
@@ -874,7 +874,7 @@ export class IntegrationService implements OnModuleInit {
           };
         }
         throw new ConflictException(
-          old.status === "running"
+          old.status === "waiting" ? "请求正在等待用户回应，请恢复原会话" : old.status === "running"
             ? "请求正在处理中"
             : "此前请求未完成，请使用新的 Idempotency-Key",
         );
@@ -994,12 +994,53 @@ export class IntegrationService implements OnModuleInit {
     return transaction ? work(transaction) : this.db.transaction(work);
   }
 
+  /** A human wait releases the active execution slot, never the accounting identity. */
+  async pause(callId: string, transaction?: PoolClient): Promise<void> {
+    const work = async (client: PoolClient) => {
+      await this.tokens.syncCall(client, callId);
+      const row = await client.query("UPDATE integration_calls SET status='waiting',expires_at=now()+interval '24 hours' WHERE id=$1 AND status='running' AND expires_at>now() RETURNING id", [callId]);
+      if (!row.rowCount) throw new ConflictException('当前任务不能进入等待状态');
+    };
+    if (transaction) await work(transaction); else await this.db.transaction(work);
+  }
+
+  /** A trusted, ownership-checked host resumes the same call and model ledger. */
+  async resume(callId: string, transaction?: PoolClient): Promise<void> {
+    const work = async (client: PoolClient) => {
+      await lifecycleWriteLock(client);
+      const call = (await client.query<{id:string;appId:string|null;adminId:number|null;keyId:string|null;status:string;expiresAt:Date}>(
+        'SELECT id,app_id AS "appId",admin_actor_id::int AS "adminId",key_id AS "keyId",status,expires_at AS "expiresAt" FROM integration_calls WHERE id=$1 FOR UPDATE', [callId])).rows[0];
+      if (!call || call.status !== 'waiting' || new Date(call.expiresAt).getTime() <= Date.now()) throw new ConflictException('此任务已结束或等待已过期');
+      let concurrency: number = APPLICATION_SAFETY.concurrency;
+      if (call.adminId !== null) {
+        const codes = (await workspaceAccess(this.db,call.adminId,currentWorkspaceId())).permissionCodes;
+        if (!codes.includes('agent_chat.use')) throw new ForbiddenException('Agent 对话权限已撤销');
+      } else if (call.appId) {
+        const app = (await client.query<IntegrationApp>(`SELECT ${APP_COLUMNS} FROM integration_apps WHERE id=$1 FOR UPDATE`, [call.appId])).rows[0];
+        if (!app?.enabled || !app.scopes.includes('chat:write')) throw new ForbiddenException('接入应用已停用或权限已撤销');
+        if (call.keyId) {
+          const key = (await client.query<{scopes:string[]}>('SELECT scopes FROM integration_api_keys WHERE id=$1 AND app_id=$2 AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at>now())',[call.keyId,call.appId])).rows[0];
+          if (!app.apiEnabled || !key?.scopes.includes('chat:write')) throw new ForbiddenException('原接入密钥已撤销或权限已更新');
+        } else if (!app.websiteEnabled) throw new ForbiddenException('网站接入已停用');
+        concurrency = Math.min(applicationLimit(app,'concurrency') ?? APPLICATION_SAFETY.concurrency, APPLICATION_SAFETY.concurrency);
+        const today = await this.tokens.daily(call.appId,undefined,client);
+        const tokenLimit = applicationLimit(app,'dailyTokenLimit');
+        if (tokenLimit !== null && today.totalTokens + today.reservedTokens >= tokenLimit) throw quotaExceeded('daily_token_quota_exceeded','今日 Token 额度不足，无法继续执行。',today.resetAt);
+      } else throw new ForbiddenException('执行身份无效');
+      const active = (await client.query<{count:number}>(`SELECT count(*)::int AS count FROM integration_calls WHERE id<>$1 AND status='running' AND expires_at>now() AND ${call.adminId!==null ? 'admin_actor_id=$2' : 'app_id=$2'}`, [callId,call.adminId ?? call.appId])).rows[0]?.count ?? 0;
+      if (active >= concurrency) throw quotaExceeded('concurrency_limit','当前执行数量达到上限，请稍后继续。',new Date(Date.now()+10000).toISOString());
+      await client.query("UPDATE integration_calls SET status='running',expires_at=now()+interval '3 minutes' WHERE id=$1 AND status='waiting'",[callId]);
+    };
+    if (transaction) await work(transaction); else await this.db.transaction(work);
+  }
+
   async finish<R extends IntegrationCallResult = PublicAgentResult>(
     callId: string,
     result: R | null,
     tokens = 0,
+    transaction?: PoolClient,
   ) {
-    return this.db.transaction(async (client) => {
+    const work=async (client: PoolClient) => {
       await lifecycleWriteLock(client);
       // Backward-compatible trace totals for callers without model accounting.
       // Normal requests already have one row per model attempt and must not double-count.
@@ -1016,7 +1057,7 @@ export class IntegrationService implements OnModuleInit {
         : null;
       await client.query(
         `UPDATE integration_calls SET status=$2,response=$3,run_id=COALESCE($4,run_id),trace_id=COALESCE($5,trace_id),finished_at=now()
-        WHERE id=$1 AND status='running'`,
+        WHERE id=$1 AND status IN ('running','waiting')`,
         [
           callId,
           result ? "completed" : "failed",
@@ -1026,7 +1067,8 @@ export class IntegrationService implements OnModuleInit {
         ],
       );
       return response;
-    });
+    };
+    return transaction?work(transaction):this.db.transaction(work);
   }
 
   async publicUsage(identity: IntegrationIdentity) {

@@ -5,6 +5,7 @@ import { ConversationService } from './conversation.service';
 import type { InboundMessage } from '../channels/channel.types';
 import type { AgentEvent, AgentEventBase } from '../channels/agent-event';
 import { InMemoryMessageBus } from '../message-bus/in-memory-message-bus';
+import { InteractionSuspension } from '../interactions/contracts';
 
 @Injectable()
 export class ChatApplicationService {
@@ -27,6 +28,7 @@ export class ChatApplicationService {
       await this.messageBus.publish({ ...base, eventId: randomUUID(), type: 'message.completed', answer: answer.answer, refused: answer.refused, citations: answer.citations });
       return answer;
     } catch (error) {
+      if(error instanceof InteractionSuspension) throw error;
       await this.messageBus.publish({ ...base, eventId: randomUUID(), type: 'run.failed', errorCode: this.errorCode(error) });
       throw error;
     }

@@ -11,6 +11,7 @@ import {
 } from "./chatbot.controller";
 import { ChatbotService } from "./chatbot.service";
 import { ChatbotAttachmentService } from "./chatbot-attachment.service";
+import { InteractionModule } from "../interactions/interaction.module";
 @Module({
   imports: [
     AdminModule,
@@ -19,6 +20,7 @@ import { ChatbotAttachmentService } from "./chatbot-attachment.service";
     ExecutionModule,
     ChatModule,
     ArtifactModule,
+    InteractionModule,
   ],
   controllers: [AdminChatbotController, WebsiteChatbotController],
   providers: [ChatbotService, ChatbotAttachmentService],

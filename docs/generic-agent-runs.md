@@ -6,6 +6,7 @@
 
 - `POST /api/v1/agent/:agentId/runs`：同步 JSON，或 `stream=true` 的 SSE。
 - `GET /api/v1/agent/:agentId/runs/:runId?userId=...`：查询当前身份的执行状态／最终结果。
+- `POST /api/v1/agent/:agentId/runs/:runId/interactions/:interactionId/respond?userId=...`：回答原任务的补充信息或审批卡片，继续正式单 Agent 执行；详见[交互协议](human-interactions.md)。
 - 使用已有平台 API Key。Agent ID 必须与接入应用绑定一致；不接受网站访客令牌或管理员登录令牌。
 - 执行复用 `chat:write`；查询复用 `conversations:read`，不新增重复权限体系。API Key 和应用权限均需允许。
 - `userId` 是平台接入方提供的稳定用户标识，必填。不需要 `conversationId`。现有身份表用于归属隔离，不创建会话或历史消息。
@@ -68,7 +69,7 @@ JSON／SSE 最终结果包含：`runId`、`traceId`、`agentId`、`agentVersionI
 
 `usage` 来自已有模型尝试账本，而不是把子图用量重复累加作为费用。拒绝回答是已结束的正常结果；异常、取消和超时保存为失败。请求父追踪覆盖结果持久化和计费完成；若计费完成失败，保留已付模型用量并更新失败 Trace，不再次调用模型／工具。未知供应商费用不会因为断流而免费释放。
 
-SSE 使用 `run_started`、`answer_delta`／`answer_reset`、`progress`、公开 commentary、`retry_status`、`done` 或 `error`。`done` 是唯一的最终结果，文本增量仍是临时内容；重放只发送开始及最终结果，不重新生成增量。关闭连接取消同一执行图，不重启任务。
+SSE 使用 `run_started`、`answer_delta`／`answer_reset`、`progress`、公开 commentary、`retry_status`、`done` 或 `error`。需要用户回应时发送 `interaction_required` 并关闭当前流，此时为 `waiting`，不发送完成或错误；非流式返回 202。`done` 是唯一的最终结果，文本增量仍是临时内容；重放只发送开始及最终结果，不重新生成增量。活动执行中关闭连接取消同一执行图，不重启任务；已持久化的等待由回应接口继续。
 
 ## 幂等与历史
 
@@ -79,7 +80,7 @@ SSE 使用 `run_started`、`answer_delta`／`answer_reset`、`progress`、公开
 - 正在处理、失败或过期的 Key：409，不自动恢复／重放写操作。
 - 使用新 Key 是一次**新的业务执行**，不保证外部写操作恰好一次；写工具仍需要自身幂等与批准策略。
 
-查询仅返回当前应用、当前用户的 Run；不返回其他应用、用户或会话调用的结果。成功／失败本地 Trace 使用已有表中可空会话字段，业务账本沿用 `integration_calls`／`integration_model_calls`，本次没有新增数据库迁移。
+查询仅返回当前应用、当前用户的 Run；不返回其他应用、用户或会话调用的结果。成功／失败本地 Trace 使用已有表中可空会话字段，业务账本沿用 `integration_calls`／`integration_model_calls`。补充信息与审批由 `0060_human_interactions.sql` 增加等待状态及私有原生检查点，不替换原账本。
 
 ## 追踪与验证
 

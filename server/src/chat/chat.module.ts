@@ -24,9 +24,10 @@ import { IntegrationChatGateway } from './integration-chat.gateway';
 import { AgentApiController } from './agent-api.controller';
 import { ContextMemoryService } from './context-memory.service';
 import { PromptsModule } from '../prompts/prompts.module';
+import { InteractionModule } from '../interactions/interaction.module';
 
 @Module({
-  imports: [ArtifactModule, AgentManagementModule, DocumentModule, AdminModule, AgentModule, SkillsModule, IntegrationModule, PromptsModule],
+  imports: [ArtifactModule, AgentManagementModule, DocumentModule, AdminModule, AgentModule, SkillsModule, IntegrationModule, PromptsModule,InteractionModule],
   controllers: [AdminExecutionController, ChatController, AgentApiController, AdminChatTraceController, AdminConversationController, AdminDebugController, AdminAgentConfigController],
   providers: [ChatService, ChatRateLimitService, ConversationService, ChatOrchestratorService, ChatApplicationService, AdminDebugService, AdminConversationService, AgentSettingsService, IntegrationChatGateway, ContextMemoryService],
   exports:[ConversationService],

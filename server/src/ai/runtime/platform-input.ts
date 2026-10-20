@@ -17,6 +17,8 @@ import type {
 import type { PromptRuntimeSnapshot } from "../../prompts/prompt-runtime.service";
 
 export type PlatformAgentInput = {
+  /** Authenticated host bridge, never caller-provided JSON. */
+  interactionHost?: import("../../interactions/contracts").RuntimeInteractionHost;
   /** Server-validated generic input, not a second executor or a Chat envelope. */
   taskInput?: import("../agent/execution-contract").AgentTaskInput;
   signal?: AbortSignal;

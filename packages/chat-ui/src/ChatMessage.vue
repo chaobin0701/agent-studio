@@ -4,19 +4,34 @@ import { Bubble, FilesCard } from "vue-element-plus-x";
 import { ElButton, ElTag, ElMessage, ElImage } from "element-plus";
 import DOMPurify from "dompurify";
 import { Marked } from "marked";
-import type { ChatTurn } from "./types";
+import ChatInteraction from "./ChatInteraction.vue";
+import type { ChatTurn, ChatInteractionResponse } from "./types";
 import "./styles.css";
 const props = withDefaults(
-  defineProps<{ message: ChatTurn; showInspect?: boolean }>(),
-  { showInspect: true },
+  defineProps<{
+    message: ChatTurn;
+    showInspect?: boolean;
+    interactionDisabled?: boolean;
+    interactionRespondingId?: string;
+    interactionErrors?: Record<string, string>;
+  }>(),
+  { showInspect: true, interactionDisabled: true },
 );
-defineEmits<{ download: [id: string]; inspect: [traceId: string] }>();
+defineEmits<{
+  download: [id: string];
+  inspect: [traceId: string];
+  respond: [response: ChatInteractionResponse];
+  cancelInteraction: [];
+}>();
 const markdown = new Marked({ renderer: { html: () => "" } });
 const html = computed(() =>
   DOMPurify.sanitize(markdown.parse(props.message.content, { async: false }), {
     FORBID_TAGS: ["img", "style", "iframe", "svg", "math"],
   }),
 );
+const pendingInteractions = computed(() => props.message.interactions?.filter(item => item.status === 'pending') ?? []);
+const resolvedInteractions = computed(() => props.message.interactions?.filter(item => item.status !== 'pending') ?? []);
+const activityKey = computed(() => resolvedInteractions.value.map(item => `${item.id}:${item.status}`).join('|'));
 async function copy() {
   try {
     await navigator.clipboard.writeText(props.message.content);
@@ -45,12 +60,29 @@ async function copy() {
       ></template
     >
     <template #content>
+      <details v-if="message.role === 'assistant' && (message.progress?.length || resolvedInteractions.length)" :key="activityKey" class="chatbot-progress">
+        <summary>工具调用过程 · {{ (message.progress?.length ?? 0) + resolvedInteractions.length }} 项</summary>
+        <p v-for="(item, i) in message.progress" :key="i">{{ typeof item === 'string' ? item : item.text }}</p>
+        <ChatInteraction v-for="interaction in resolvedInteractions" :key="interaction.id" :interaction="interaction" disabled />
+      </details>
       <div
         v-if="message.role === 'assistant'"
         class="chatbot-markdown"
         v-html="html"
       />
       <div v-else class="chatbot-plain">{{ message.content }}</div>
+      <template v-if="message.role === 'assistant'">
+        <ChatInteraction
+          v-for="interaction in pendingInteractions"
+          :key="interaction.id"
+          :interaction="interaction"
+          :disabled="interactionDisabled || !!interactionRespondingId"
+          :submitting="interactionRespondingId === interaction.id"
+          :error="interactionErrors?.[interaction.id]"
+          @respond="$emit('respond', $event)"
+          @cancel="$emit('cancelInteraction')"
+        />
+      </template>
       <div v-if="message.attachments?.length" class="chatbot-message-files">
         <FilesCard
           v-for="file in message.attachments"
@@ -89,12 +121,6 @@ async function copy() {
           @click="$emit('download', file.id!)"
         />
       </div>
-      <details v-if="message.progress?.length" class="chatbot-progress">
-        <summary>执行进度</summary>
-        <p v-for="(item, i) in message.progress" :key="i">
-          {{ typeof item === "string" ? item : item.text }}
-        </p>
-      </details>
       <div
         v-if="message.references?.length"
         class="chatbot-message-files"

@@ -4,6 +4,7 @@ import {readFileSync} from 'node:fs';
 import {createRequire} from 'node:module';
 import {runInNewContext} from 'node:vm';
 import {createDraftQueue} from '../apps/web-ele/src/composables/draft-queue.ts';
+import {httpToolConfig,toolTestExample} from '../apps/web-ele/src/views/tools/create-config.ts';
 const require=createRequire(new URL('../apps/web-ele/package.json',import.meta.url));
 const ts=require('typescript'), {ref,computed}=require('vue');
 function script(relative){
@@ -19,7 +20,7 @@ function fixture(kind='tool',manage=true){
   post:async(url,body)=>{calls.push({url,body});if(url.endsWith('/draft')){resource.versions.unshift({...JSON.parse(JSON.stringify(resource.versions[0])),id:32,status:'draft',version:2});return {versionId:32};}return {ok:true};},
   patch:async(url,body)=>{calls.push({url,body});return {revision:body.revision+1};},
  };
- const context={ref,computed,watch(){},defineAsyncComponent(){},onBeforeUnmount(){},createDraftQueue,
+ const context={ref,computed,watch(){},defineAsyncComponent(){},onBeforeUnmount(){},createDraftQueue,httpToolConfig,toolTestExample,
   useRoute:()=>route,useRouter:()=>({}),useAccessStore:()=>({accessCodes:manage?['agent_config.manage','agent_tools.execute']:[]}),
   useUnsavedChanges:(_dirty,flush)=>async()=>flush?flush():true,api,ElMessage:{success(){},warning(){},info(){}},ElMessageBox:{confirm:async()=>{}},setTimeout,clearTimeout};
  runInNewContext(`${script('resources/index.vue')}\nglobalThis.page={load,detail,selected,config,original,dirty,preparePreview,draftQueue,saveState,toolContentValid,openToolTest,testOpen,publish};`,context);
