@@ -19,7 +19,7 @@ function bounded(value: unknown, bytes: number) { if (Buffer.byteLength(JSON.str
 export class InteractionService {
   constructor(private readonly db: DatabaseService) {}
   private public(row: Row): PublicInteraction {
-    return { ...row.public_request, id:row.id,runId:row.run_id,kind:row.kind,status:row.status,revision:row.revision,expiresAt:new Date(row.expires_at).toISOString(),...(row.kind==="question" && row.response ? {answer:row.response as {optionId?:string;text?:string}} : {}) } as PublicInteraction;
+    return { ...row.public_request, id:row.id,runId:row.run_id,kind:row.kind,status:row.status,revision:row.revision,expiresAt:new Date(row.expires_at).toISOString(),...(row.kind==="question" && row.response ? {answer:row.response as PublicInteraction["answer"]} : {}) } as PublicInteraction;
   }
   private runtime(runId:string, thread?:Thread, response?:JsonValue):RuntimeInteractionHost {
     return {checkpointer:new PostgresCheckpointSaver(this.db,runId),threadId:runId,...(thread?.continuation ? {continuation:thread.continuation}:{}),...(response!==undefined && thread?.interrupt_id ? {resume:{interruptId:thread.interrupt_id,value:response}}:{})};
@@ -101,7 +101,7 @@ export class InteractionService {
       if(new Date(row.expires_at).getTime()<=Date.now() || new Date(thread.expires_at).getTime()<=Date.now()) throw new ConflictException("交互请求已过期，请发起新任务");
       if(!thread.continuation.harness || !thread.continuation.execution) throw new ConflictException("原生执行状态不完整，不能重新执行工具");
       await transition?.(c);
-      const status=input.kind==="approval" ? input.decision==="approve"?"approved":"rejected" : "answered";
+      const status=input.kind==="approval" ? input.decision==="approve"?"approved":"rejected" : input.skip?"skipped":"answered";
       const resolved=(await c.query<Row>("UPDATE agent_interactions SET status=$2,response=$3::jsonb,response_fingerprint=$4,revision=revision+1,resolved_at=now() WHERE id=$1 RETURNING *",[row.id,status,JSON.stringify(response),fingerprint])).rows[0];
       await c.query("UPDATE agent_interaction_threads SET status='resuming',updated_at=now() WHERE run_id=$1",[runId]);
       return {replayed:false,interaction:this.public(resolved),hostInput:thread.host_input,host:this.runtime(runId,thread,response)};
@@ -111,6 +111,7 @@ export class InteractionService {
     if(input.kind!==request.kind) throw new BadRequestException("交互类型不匹配");
     if(input.kind==="approval") return {decision:input.decision};
     if(request.kind!=="question") throw new BadRequestException("交互类型不匹配");
+    if(input.skip) return {skipped:true};
     if(input.optionId) { const option=request.options.find(option=>option.id===input.optionId);if(!option)throw new BadRequestException("所选选项不存在");return {optionId:option.id,text:option.label}; }
     if(!request.allowCustom || !input.text) throw new BadRequestException("当前问题不允许自由填写");
     return {text:input.text};

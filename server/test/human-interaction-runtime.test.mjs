@@ -60,6 +60,21 @@ test("native question resumes a recreated harness without repeating the model re
   assert.equal(result.result.usage.totalTokens, 10);
 });
 
+test("skipping a choice-only question resumes the same native task without inventing an answer", async () => {
+  const f = fixture((request, index) => {
+    if (index === 1) return calls(["skip-1", "ask_user", {...question,allowCustom:false}]);
+    assert.match(JSON.stringify(request.messages), /skipped.*true/);
+    assert.match(JSON.stringify(request.messages), /不要推测缺失信息/);
+    return final("按现有信息继续");
+  }, [new AskUserTool()]);
+  const host = {threadId:"skip-question",checkpointer:new MemorySaver()};
+  const waiting = await suspend(f.run(host));
+  const result = await f.run(restart(host,waiting,{skipped:true}));
+  assert.equal(result.result.answer,"按现有信息继续");
+  assert.equal(f.requests.length,2);
+  assert.equal(result.toolCalls,1);
+});
+
 test("successful write before a later question is never replayed by native resume", async () => {
   let writes = 0;
   const write = managedWrite("save_record", 9, async () => { writes++; return { success: true, content: "saved" }; }, false);

@@ -96,6 +96,19 @@ test("private continuation must exist before a response can claim a Run",async()
   assert.equal(fixture.row.status,"pending");
 });
 
+test("skip has its own durable response, is idempotent and cannot be combined with an answer",async()=>{
+  const f=responseStore({kind:"question",question:"预算？",options:[{id:"one",label:"2000元"}],allowCustom:false});
+  const response={kind:"question",interactionId:f.id,revision:1,skip:true};
+  await assert.rejects(f.service.respond(f.runId,{...response,optionId:"one"}),/有效的交互/);
+  await assert.rejects(f.service.respond(f.runId,{...response,text:"forged"}),/有效的交互/);
+  const accepted=await f.service.respond(f.runId,response,f.transition);
+  assert.equal(accepted.interaction.status,"skipped");
+  assert.deepEqual(accepted.host.resume.value,{skipped:true});
+  assert.deepEqual(accepted.interaction.answer,{skipped:true});
+  assert.equal((await f.service.respond(f.runId,response,f.transition)).replayed,true);
+  assert.equal(f.transitions,1);
+});
+
 test("native Deep Agents resumes through a recreated Postgres saver without a second model question",async()=>{
   const store=checkpointStore(),runId=randomUUID(),traceId=randomUUID();
   let modelCalls=0;

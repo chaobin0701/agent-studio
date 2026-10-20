@@ -12,7 +12,7 @@ import { questionSchema } from "../tools/ask-user.tool";
 type Grant = NonNullable<ToolContext["toolApproval"]>;
 export type HumanInteractionState = {
   grants: Record<string, Grant>;
-  answers: Record<string, { text: string; optionId?: string }>;
+  answers: Record<string, { text: string; optionId?: string } | { skipped: true }>;
   rejected: Record<string, true>;
 };
 export const emptyHumanInteractionState = (): HumanInteractionState => ({ grants: Object.create(null), answers: Object.create(null), rejected: Object.create(null) });
@@ -95,7 +95,8 @@ export function interactionMiddleware(
           const question = parsedQuestion.data;
           const request: QuestionRequest = { kind: "question", ...question };
           const raw: unknown = interrupt({ type: "agent_studio_interaction", request });
-          const answer = z.object({ optionId: z.string().max(80).optional(), text: z.string().trim().min(1).max(4000) }).strict().parse(raw);
+          const answer = z.union([z.object({ skipped: z.literal(true) }).strict(), z.object({ optionId: z.string().max(80).optional(), text: z.string().trim().min(1).max(4000) }).strict()]).parse(raw);
+          if ("skipped" in answer) { state.answers[call.id] = answer; continue; }
           if (answer.optionId) {
             const option = question.options.find((item) => item.id === answer.optionId);
             if (!option || answer.text !== option.label) throw new TypeError("Invalid question option response");

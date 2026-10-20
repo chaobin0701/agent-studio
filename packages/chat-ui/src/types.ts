@@ -19,7 +19,7 @@ export interface ChatInteraction {
   runId: string;
   kind: "question" | "approval";
   status:
-    "pending" | "answered" | "approved" | "rejected" | "expired" | "cancelled";
+    "pending" | "answered" | "skipped" | "approved" | "rejected" | "expired" | "cancelled";
   revision: number;
   expiresAt: string;
   question?: string;
@@ -28,7 +28,7 @@ export interface ChatInteraction {
   toolName?: string;
   description?: string;
   arguments?: Record<string, unknown>;
-  answer?: { optionId?: string; text?: string };
+  answer?: { optionId?: string; text?: string; skipped?: true };
 }
 export type ChatInteractionResponse =
   | {
@@ -37,6 +37,7 @@ export type ChatInteractionResponse =
       revision: number;
       optionId?: string;
       text?: string;
+      skip?: true;
     }
   | {
       kind: "approval";

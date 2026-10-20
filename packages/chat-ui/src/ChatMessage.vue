@@ -29,6 +29,9 @@ const html = computed(() =>
     FORBID_TAGS: ["img", "style", "iframe", "svg", "math"],
   }),
 );
+const pendingInteractions = computed(() => props.message.interactions?.filter(item => item.status === 'pending') ?? []);
+const resolvedInteractions = computed(() => props.message.interactions?.filter(item => item.status !== 'pending') ?? []);
+const activityKey = computed(() => resolvedInteractions.value.map(item => `${item.id}:${item.status}`).join('|'));
 async function copy() {
   try {
     await navigator.clipboard.writeText(props.message.content);
@@ -57,6 +60,11 @@ async function copy() {
       ></template
     >
     <template #content>
+      <details v-if="message.role === 'assistant' && (message.progress?.length || resolvedInteractions.length)" :key="activityKey" class="chatbot-progress">
+        <summary>工具调用过程 · {{ (message.progress?.length ?? 0) + resolvedInteractions.length }} 项</summary>
+        <p v-for="(item, i) in message.progress" :key="i">{{ typeof item === 'string' ? item : item.text }}</p>
+        <ChatInteraction v-for="interaction in resolvedInteractions" :key="interaction.id" :interaction="interaction" disabled />
+      </details>
       <div
         v-if="message.role === 'assistant'"
         class="chatbot-markdown"
@@ -65,7 +73,7 @@ async function copy() {
       <div v-else class="chatbot-plain">{{ message.content }}</div>
       <template v-if="message.role === 'assistant'">
         <ChatInteraction
-          v-for="interaction in message.interactions"
+          v-for="interaction in pendingInteractions"
           :key="interaction.id"
           :interaction="interaction"
           :disabled="interactionDisabled || !!interactionRespondingId"
@@ -113,12 +121,6 @@ async function copy() {
           @click="$emit('download', file.id!)"
         />
       </div>
-      <details v-if="message.progress?.length" class="chatbot-progress">
-        <summary>执行进度</summary>
-        <p v-for="(item, i) in message.progress" :key="i">
-          {{ typeof item === "string" ? item : item.text }}
-        </p>
-      </details>
       <div
         v-if="message.references?.length"
         class="chatbot-message-files"

@@ -24,6 +24,6 @@ export interface ToolContext {
     toolVersionId: number;
     argumentsHash: string;
   };
-  readonly interactionAnswer?: { toolCallId: string; text: string; optionId?: string };
+  readonly interactionAnswer?: { toolCallId: string } & ({ text: string; optionId?: string } | { skipped: true });
   readonly state: Map<string, unknown>;
 }

@@ -99,10 +99,10 @@ function fixture() {
                     ? body.decision === "approve"
                       ? "approved"
                       : "rejected"
-                    : "answered",
+                    : body.skip ? "skipped" : "answered",
                 ...(body.kind === "question"
                   ? {
-                      answer: body.optionId
+                      answer: body.skip ? { skipped: true } : body.optionId
                         ? { optionId: body.optionId }
                         : { text: body.text },
                     }
@@ -490,6 +490,22 @@ test("approval submits only its bound decision, deduplicates clicks and retains 
   } finally {
     c.dispose();
   }
+});
+
+test("skip continues the original task and preserves the unsent draft instead of cancelling", async () => {
+  const f=fixture(),c=createChatbotClient(f.api,'skip',f.storage);
+  try {
+    await c.initialize();c.draft('ask me first');await c.send();
+    const question=f.waitFor();await pause();
+    c.draft('keep this unsent draft');
+    await c.respond({kind:'question',interactionId:question.id,revision:1,skip:true});
+    assert.equal(c.current().runId,f.runId);
+    assert.equal(c.current().runStatus,'running');
+    assert.equal(c.current().draft,'keep this unsent draft');
+    assert.equal(c.current().messages.at(-1).interactions[0].status,'skipped');
+    assert.deepEqual(f.calls.find(call=>call.path.endsWith('/respond')).body,{kind:'question',interactionId:question.id,revision:1,skip:true});
+    assert.equal(f.calls.some(call=>call.path.endsWith('/cancel')),false);
+  } finally {c.dispose();}
 });
 
 test("uncertain interaction responses reconcile by GET and remain explicit without replaying tools or messages", async () => {

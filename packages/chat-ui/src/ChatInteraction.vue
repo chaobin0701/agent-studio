@@ -15,20 +15,19 @@ const emit = defineEmits<{
 }>();
 const selected = ref("");
 const text = ref("");
-const custom = ref(false);
 const pending = computed(() => props.interaction.status === "pending");
 const blocked = computed(
   () => props.disabled || props.submitting || !pending.value,
 );
-const canSubmit = computed(
-  () =>
-    !blocked.value && (custom.value ? !!text.value.trim() : !!selected.value),
-);
+const selectedOption = computed(() => props.interaction.options?.find(option => option.id === selected.value));
+const responseText = computed(() => text.value.trim() ? [selectedOption.value?.label, text.value.trim()].filter(Boolean).join("\n补充：") : "");
+const canSubmit = computed(() => !blocked.value && (!!selected.value || !!responseText.value) && responseText.value.length <= 4000);
 const status = computed(
   () =>
     ({
       pending: props.interaction.kind === "approval" ? "等待确认" : "等待回答",
       answered: "已回答",
+      skipped: "已跳过",
       approved: "已批准",
       rejected: "已拒绝",
       expired: "已过期",
@@ -42,15 +41,11 @@ const answer = computed(
       (option) => option.id === props.interaction.answer?.optionId,
     )?.label,
 );
-const argumentsText = computed(() =>
-  JSON.stringify(props.interaction.arguments ?? {}, null, 2),
-);
 watch(
   () => props.interaction.id,
   () => {
     selected.value = "";
     text.value = "";
-    custom.value = false;
   },
 );
 function question() {
@@ -59,8 +54,8 @@ function question() {
     kind: "question",
     interactionId: props.interaction.id,
     revision: props.interaction.revision,
-    ...(custom.value
-      ? { text: text.value.trim() }
+    ...(responseText.value
+      ? { text: responseText.value }
       : { optionId: selected.value }),
   });
 }
@@ -76,6 +71,7 @@ function approval(decision: "approve" | "reject") {
 </script>
 <template>
   <section
+    v-if="pending"
     class="chatbot-interaction"
     :aria-label="interaction.kind === 'approval' ? '工具审批' : '补充信息'"
     :aria-busy="submitting"
@@ -101,49 +97,35 @@ function approval(decision: "approve" | "reject") {
             :key="option.id"
             type="button"
             class="chatbot-interaction-option"
-            :class="{ 'is-selected': !custom && selected === option.id }"
-            :aria-pressed="!custom && selected === option.id"
+            :class="{ 'is-selected': selected === option.id }"
+            :aria-pressed="selected === option.id"
             :disabled="blocked"
             @click="
-              selected = option.id;
-              custom = false;
+              selected = selected === option.id ? '' : option.id;
             "
           >
             {{ option.label }}
           </button>
-          <button
-            v-if="interaction.allowCustom"
-            type="button"
-            class="chatbot-interaction-option"
-            :class="{ 'is-selected': custom }"
-            :aria-pressed="custom"
-            :disabled="blocked"
-            @click="custom = true"
-          >
-            自由填写
-          </button>
         </div>
         <ElInput
-          v-if="custom || !interaction.options?.length"
+          v-if="interaction.allowCustom"
           v-model="text"
           type="textarea"
           :rows="2"
           :maxlength="4000"
           :disabled="blocked"
-          aria-label="填写回答"
-          placeholder="填写你的回答"
-          @input="custom = true"
+          aria-label="补充信息"
+          placeholder="补充信息（可选），也可以直接填写你的回答"
         />
+        <p v-if="responseText.length > 4000" class="chatbot-error" role="alert">选项与补充信息合计不能超过 4000 字。</p>
         <div class="chatbot-interaction-actions">
+          <ElButton :disabled="blocked" @click="$emit('respond', { kind: 'question', interactionId: interaction.id, revision: interaction.revision, skip: true })">跳过</ElButton>
           <ElButton
             type="primary"
             :disabled="!canSubmit"
             :loading="submitting"
             @click="question()"
-            >提交回答</ElButton
-          >
-          <ElButton :disabled="blocked" @click="$emit('cancel')"
-            >取消任务</ElButton
+            >提交</ElButton
           >
         </div>
       </template>
@@ -154,12 +136,8 @@ function approval(decision: "approve" | "reject") {
       <p v-if="interaction.description" class="chatbot-interaction-description">
         {{ interaction.description }}
       </p>
-      <details class="chatbot-interaction-arguments" open>
-        <summary>调用参数</summary>
-        <pre>{{ argumentsText }}</pre>
-      </details>
       <template v-if="pending">
-        <p class="chatbot-interaction-note">批准仅适用于本次调用及以上参数。</p>
+        <p class="chatbot-interaction-note">批准仅适用于本次调用。</p>
         <div class="chatbot-interaction-actions">
           <ElButton
             type="primary"
@@ -176,4 +154,9 @@ function approval(decision: "approve" | "reject") {
     </template>
     <p v-if="error" class="chatbot-error" role="alert">{{ error }}</p>
   </section>
+  <div v-else class="chatbot-interaction-record">
+    <div class="chatbot-interaction-record-heading"><span>{{ interaction.kind === 'question' ? '补充信息' : '执行确认' }}</span><span>{{ status }}</span></div>
+    <p>{{ interaction.kind === 'question' ? interaction.question : interaction.toolName }}</p>
+    <p v-if="answer" class="chatbot-interaction-answer">{{ answer }}</p>
+  </div>
 </template>

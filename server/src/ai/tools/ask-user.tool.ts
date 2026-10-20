@@ -27,6 +27,7 @@ export class AskUserTool implements AgentTool<z.infer<typeof questionSchema>> {
   async execute(input: z.infer<typeof questionSchema>, context: ToolContext): Promise<ToolResult> {
     const answer = context.interactionAnswer;
     if (!answer) return { success: false, content: "当前入口未提供用户交互回答", errorCode: "interaction_transport_unavailable" };
+    if ("skipped" in answer) return { success: true, content: JSON.stringify({ skipped: true, message: "用户跳过了这个问题。根据已知信息继续，不要推测缺失信息或重复询问同一个问题。" }) };
     const selected = answer.optionId && input.options.find((option) => option.id === answer.optionId);
     if (answer.optionId ? !selected || selected.label !== answer.text : !input.allowCustom)
       return { success: false, content: "用户回答与问题不匹配", errorCode: "interaction_response_invalid" };

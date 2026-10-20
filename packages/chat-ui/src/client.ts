@@ -518,7 +518,7 @@ export function createChatbotClient(
             kind: "question",
             interactionId: interaction.id,
             revision: interaction.revision,
-            ...(response.optionId
+            ...(response.skip ? { skip: true as const } : response.optionId
               ? { optionId: response.optionId }
               : { text: response.text?.trim() }),
           };
@@ -529,9 +529,9 @@ export function createChatbotClient(
       return;
     if (
       body.kind === "question" &&
-      !(body.optionId
+      !(body.skip || (body.optionId
         ? interaction.options?.some((o) => o.id === body.optionId)
-        : interaction.allowCustom && body.text && body.text.length <= 4000)
+        : interaction.allowCustom && body.text && body.text.length <= 4000))
     )
       return;
     buffer.respondingId = interaction.id;
@@ -543,6 +543,10 @@ export function createChatbotClient(
         body,
       );
       if (disposed) return;
+      interaction.revision += 1;
+      buffer.runStatus = 'running';
+      interaction.status = body.kind === 'approval' ? body.decision === 'approve' ? 'approved' : 'rejected' : body.skip ? 'skipped' : 'answered';
+      if (body.kind === 'question') interaction.answer = body.skip ? { skipped: true } : body.optionId ? { optionId: body.optionId, text: interaction.options?.find(option => option.id === body.optionId)?.label } : { text: body.text };
       observers.get(runId)?.abort();
       observers.delete(runId);
       await load(id);

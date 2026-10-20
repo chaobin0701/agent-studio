@@ -214,9 +214,12 @@
   overflow-wrap: anywhere;
 }
 .chatbot-interaction-options {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
   margin-block: 0.75rem;
 }
 .chatbot-interaction-option {
+  width: 100%;
   padding: 0.625rem 0.875rem;
   font: inherit;
   font-size: 0.9rem;
@@ -243,6 +246,7 @@
   opacity: 0.65;
 }
 .chatbot-interaction-actions {
+  justify-content: flex-end;
   margin-top: 0.875rem;
 }
 .chatbot-interaction-actions .el-button + .el-button {
@@ -258,24 +262,15 @@
   font-size: 0.8rem;
   color: var(--el-text-color-regular, #606266);
 }
-.chatbot-interaction-arguments {
-  margin-block: 0.75rem;
-  font-size: 0.85rem;
-}
-.chatbot-interaction-arguments summary {
-  cursor: pointer;
-}
-.chatbot-interaction-arguments pre {
-  margin-bottom: 0;
-  padding: 0.75rem;
-  max-height: 18rem;
-  max-width: 100%;
-  overflow: auto;
-  white-space: pre-wrap;
+.chatbot-interaction-record {
+  margin-top: 0.75rem;
+  padding-inline-start: 0.75rem;
+  border-inline-start: 2px solid var(--el-border-color-light, #e4e7ed);
+  line-height: 1.6;
   overflow-wrap: anywhere;
-  background: var(--el-fill-color-lighter, #fafafa);
-  border-radius: 0.375rem;
 }
+.chatbot-interaction-record-heading { display: flex; gap: 0.75rem; }
+.chatbot-interaction-record p { margin-block: 0.25rem; white-space: pre-wrap; }
 .chatbot-mobile-toggle {
   display: none;
 }

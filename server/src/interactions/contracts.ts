@@ -3,7 +3,7 @@ import { z } from "zod";
 
 export type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
 export type JsonObject = { [key: string]: JsonValue };
-export type InteractionStatus = "pending" | "answered" | "approved" | "rejected" | "expired" | "cancelled";
+export type InteractionStatus = "pending" | "answered" | "skipped" | "approved" | "rejected" | "expired" | "cancelled";
 export type QuestionRequest = {
   kind: "question";
   question: string;
@@ -33,11 +33,11 @@ export type PublicInteraction = {
   toolName?: string;
   description?: string;
   arguments?: JsonObject;
-  answer?: { optionId?: string; text?: string };
+  answer?: { optionId?: string; text?: string; skipped?: true };
 };
 export const interactionResponseSchema = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("question"), interactionId: z.string().uuid(), revision: z.number().int().positive(), optionId: z.string().min(1).max(80).optional(), text: z.string().trim().min(1).max(4000).optional() }).strict()
-    .refine((value) => Boolean(value.optionId) !== Boolean(value.text), "请选择一个选项或填写回答"),
+  z.object({ kind: z.literal("question"), interactionId: z.string().uuid(), revision: z.number().int().positive(), optionId: z.string().min(1).max(80).optional(), text: z.string().trim().min(1).max(4000).optional(), skip: z.literal(true).optional() }).strict()
+    .refine((value) => [value.optionId, value.text, value.skip].filter(Boolean).length === 1, "请选择一个选项、填写回答或跳过"),
   z.object({ kind: z.literal("approval"), interactionId: z.string().uuid(), revision: z.number().int().positive(), decision: z.enum(["approve", "reject"]) }).strict(),
 ]);
 export type InteractionResponse = z.infer<typeof interactionResponseSchema>;
