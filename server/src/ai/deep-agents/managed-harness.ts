@@ -14,6 +14,9 @@ import {
   MultipleStructuredOutputsError,
 } from "langchain";
 import { createHash } from "node:crypto";
+import { Command } from "@langchain/langgraph";
+import { InteractionSuspension, type RuntimeInteractionHost, type InteractionRequest } from "../../interactions/contracts";
+import { emptyHumanInteractionState, interactionHash, interactionMiddleware, privateJson, type HumanInteractionState } from "./human-interaction";
 import { AIMessage, HumanMessage, ToolMessage } from "@langchain/core/messages";
 import { AgentProtocolError } from "../agent/model-response";
 import { RunnableLambda } from "@langchain/core/runnables";
@@ -98,6 +101,9 @@ const SUMMARY_CODE_VERSION = createHash("sha256")
   .digest("hex");
 
 export type ManagedHarnessOptions = {
+  interactionHost?: RuntimeInteractionHost;
+  /** Host checks entry composition; members cannot inherit root interaction authority. */
+  interactionsAllowed?: boolean;
   fileOutputs?: {
     enabled: boolean;
     capture: (
@@ -240,6 +246,7 @@ export class ManagedDeepAgentHarness {
       formatterSeen = false;
     const context = { ...options.toolContext, signal };
     let nativeCallId = "";
+    const humanState: HumanInteractionState = emptyHumanInteractionState();
     const tools = platformTools(
       options.tools,
       options.gateway,
@@ -267,6 +274,16 @@ export class ManagedDeepAgentHarness {
       },
       options.onRetryStatus,
       toolByName,
+      (tool, args) => {
+        const grant = humanState.grants[nativeCallId];
+        const parsed = tool.inputSchema.safeParse(args);
+        const answer = humanState.answers[nativeCallId];
+        return {
+          ...(grant && parsed.success && grant.toolVersionId === tool.execution?.toolVersionId &&
+            grant.argumentsHash === interactionHash(privateJson(parsed.data)) ? { toolApproval: grant } : {}),
+          ...(answer ? { interactionAnswer: { toolCallId: nativeCallId, ...answer } } : {}),
+        };
+      },
     );
     const sizes = new Map<string, number>();
     const backend = (runtime: { state: unknown }) =>
@@ -406,6 +423,7 @@ export class ManagedDeepAgentHarness {
             }
             return denied("tool_requires_replanning");
           }
+          if (humanState.rejected[id]) return denied("tool_approval_rejected");
           if (logicalToolCalls >= input.limits.maxToolCalls)
             return denied("tool_call_limit_exceeded");
           if (!toolByName.has(name)) {
@@ -709,8 +727,53 @@ export class ManagedDeepAgentHarness {
           ),
         }),
         guard,
+        interactionMiddleware(toolByName, humanState,
+          Boolean(options.interactionHost && options.interactionsAllowed !== false),
+          (tool, args) => logicalToolCalls < input.limits.maxToolCalls &&
+            state.callCount < (state.maxToolCalls ?? input.limits.maxToolCalls) &&
+            !state.seenCalls.has(JSON.stringify({ name: tool.name, arguments: args })),
+          Boolean(options.interactionHost && options.interactionsAllowed === false)),
       ],
+      ...(options.interactionHost ? { checkpointer: options.interactionHost.checkpointer } : {}),
     });
+    const fingerprint = interactionHash({ input, systemPrompt: options.systemPrompt,
+      tools: options.tools.map((tool) => [tool.name, tool.execution, tool.parameters]),
+      skills: options.skills.map((skill) => [skill.id, skill.versionId]), runtimeVersion: DEEP_AGENT_RUNTIME_VERSION });
+    let priorElapsedMs = 0;
+    const saved = options.interactionHost?.continuation?.harness;
+    if (options.interactionHost?.resume) {
+      if (!saved || saved.fingerprint !== fingerprint || saved.version !== 1)
+        throw new TypeError("Interaction continuation does not match this execution");
+      const restored = saved as unknown as {
+        decisions: number; logicalToolCalls: number; requiresReplan: boolean;
+        toolState: { callCount: number; seenCalls: string[]; resultCache: [string, import("../tools/tool-result").ToolResult][] };
+        outputs: typeof outputs; usage: typeof actualUsage; human: HumanInteractionState;
+        contextState: [string, unknown][]; sizes: [string, number][]; elapsedMs: number;
+        budget: typeof budget.counters;
+      };
+      if (!Number.isSafeInteger(restored.decisions) || !Number.isSafeInteger(restored.logicalToolCalls) ||
+        restored.decisions < 0 || restored.decisions > input.limits.maxDecisions ||
+        restored.logicalToolCalls < 0 || restored.logicalToolCalls > input.limits.maxToolCalls ||
+        !Number.isFinite(restored.elapsedMs) || restored.elapsedMs < 0)
+        throw new TypeError("Invalid private runtime continuation");
+      decisions = restored.decisions;
+      logicalToolCalls = restored.logicalToolCalls;
+      requiresReplan = restored.requiresReplan;
+      state.callCount = restored.toolState.callCount;
+      state.seenCalls = new Set(restored.toolState.seenCalls);
+      state.resultCache = new Map(restored.toolState.resultCache);
+      outputs.artifacts.push(...restored.outputs.artifacts);
+      outputs.references.push(...restored.outputs.references);
+      Object.assign(actualUsage, restored.usage);
+      for (const field of ["grants", "answers", "rejected"] as const)
+        Object.assign(humanState[field], structuredClone(restored.human[field]));
+      for (const [key, value] of restored.contextState) context.state.set(key, value);
+      for (const [key, value] of restored.sizes) sizes.set(key, value);
+      budget.restore(restored.budget);
+      priorElapsedMs = restored.elapsedMs;
+    } else if (saved) throw new TypeError("A continuation requires a resume decision");
+    if (priorElapsedMs >= (input.limits.maxDurationMs ?? 180000))
+      throw Object.assign(new Error("Agent deadline exceeded"), { code: "agent_timeout" });
     const timer = setTimeout(
       () =>
         deadline.abort(
@@ -720,7 +783,7 @@ export class ManagedDeepAgentHarness {
         ),
       Math.max(
         1,
-        (input.limits.maxDurationMs ?? 180000) - (Date.now() - startedAt),
+        (input.limits.maxDurationMs ?? 180000) - priorElapsedMs - (Date.now() - startedAt),
       ),
     );
     try {
@@ -805,7 +868,14 @@ export class ManagedDeepAgentHarness {
                     ...capture.callbacks,
                   ],
                   recursionLimit: input.limits.maxDecisions * 5 + 12,
+                  ...(options.interactionHost ? {
+                    configurable: { thread_id: options.interactionHost.threadId },
+                    durability: "sync" as const,
+                  } : {}),
                 };
+                const invocation = options.interactionHost?.resume
+                  ? new Command({ resume: { [options.interactionHost.resume.interruptId]: options.interactionHost.resume.value } })
+                  : { messages, files };
                 let completed:
                   | Awaited<ReturnType<typeof agent.invoke>>
                   | undefined;
@@ -815,18 +885,32 @@ export class ManagedDeepAgentHarness {
                     // Public text comes only from this root model's onToken hook, never
                     // from raw stream payloads, summary calls or member graph messages.
                     const stream = await agent.stream(
-                      { messages, files },
+                      invocation,
                       { ...config, streamMode: ["values", "messages"] },
                     );
                     for await (const [mode, value] of stream)
                       if (mode === "values")
                         completed = value as typeof completed;
                   } else
-                    completed = await agent.invoke({ messages, files }, config);
+                    completed = await agent.invoke(invocation, config);
                 } finally {
                   capture.close();
                 }
                 signal.throwIfAborted();
+                const interruptions = (completed as unknown as { __interrupt__?: { id?: string; value?: unknown }[] })?.__interrupt__;
+                if (interruptions?.length) {
+                  const first = interruptions[0];
+                  const envelope = first.value as { type?: string; request?: InteractionRequest } | undefined;
+                  if (!options.interactionHost || interruptions.length !== 1 || !first.id ||
+                    envelope?.type !== "agent_studio_interaction" || !envelope.request)
+                    throw new TypeError("Unsupported native graph interruption");
+                  const continuation = privateJson({ version: 1, fingerprint, decisions, logicalToolCalls, requiresReplan,
+                    toolState: { callCount: state.callCount, seenCalls: [...state.seenCalls], resultCache: [...(state.resultCache ?? [])] },
+                    contextState: [...context.state], sizes: [...sizes], outputs, usage: actualUsage,
+                    human: humanState, budget: { ...budget.counters }, elapsedMs: priorElapsedMs + Date.now() - startedAt });
+                  resetAnswer();
+                  throw new InteractionSuspension(envelope.request, first.id, { harness: continuation });
+                }
                 const final = completed?.messages.at(-1);
                 const structuredResponse =
                   completed && "structuredResponse" in completed

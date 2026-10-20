@@ -59,6 +59,7 @@ export function platformTools(
   ) => void | Pick<AgentFinalOutput, "artifacts" | "references">,
   onRetryStatus?: (event: RetryStatusEvent) => void,
   exposed: ReadonlyMap<string, AgentTool> = platformToolMap(tools),
+  interactionFor?: (tool: AgentTool, args: Record<string, unknown>) => Pick<ToolContext, "toolApproval" | "interactionAnswer">,
 ) {
   return [...exposed].map(([name, tool]) => {
     if (!state.allowedTools?.has(tool.name))
@@ -82,7 +83,7 @@ export function platformTools(
         const outcome = await gateway.execute(
           tool.name,
           args as Record<string, unknown>,
-          { ...context, signal },
+          { ...context, signal, ...interactionFor?.(tool, args as Record<string, unknown>) },
           state,
           { onRetryStatus },
         );

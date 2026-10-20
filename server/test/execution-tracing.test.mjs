@@ -16,6 +16,9 @@ import { LlmService } from "../dist/chat/llm.service.js";
 import { ProviderUnavailableError } from "../dist/ai/providers/provider-errors.js";
 import { ToolExecutionService } from "../dist/ai/tools/tool-execution.js";
 import { ToolPolicy } from "../dist/ai/tools/tool-policy.js";
+import { InteractionSuspension, InteractionWaiting } from "../dist/interactions/contracts.js";
+import { MemorySaver } from "@langchain/langgraph";
+import { AskUserTool } from "../dist/ai/tools/ask-user.tool.js";
 
 function collector() {
   const requests = [],
@@ -218,6 +221,53 @@ test("safe error classifications and annotated tool failures preserve the origin
   assert.ok(c.spans.every((s) => s.endTimeUnixNano));
   assert.doesNotMatch(JSON.stringify(c.requests), /PRIVATE|secret/);
   await tracer.close();
+});
+
+test("native human waits export only a waiting status without failed spans or private interaction state", async () => {
+  const c = collector();
+  const tracer = new PhoenixExecutionTracer({ enabled: true }, c.fetcher);
+  const suspended = new InteractionSuspension({ kind: "question", question: "PRIVATE_QUESTION",
+    options: [{ id: "a", label: "PRIVATE_OPTION" }], allowCustom: true },
+    "PRIVATE_INTERRUPT", { harness: { secret: "PRIVATE_CHECKPOINT" } });
+  const waiting = new InteractionWaiting({ id: "PRIVATE_CARD", runId: "run", kind: "question",
+    status: "pending", revision: 1, expiresAt: new Date().toISOString(), question: "PRIVATE_QUESTION" });
+  for (const error of [suspended, waiting])
+    await assert.rejects(tracer.span("human_wait", "chain", { localRunId: "run" }, async () => { throw error; }),
+      (caught) => caught === error);
+  await assert.rejects(tracer.span("spoofed_wait", "tool", {}, async () => {
+    throw Object.assign(new Error("PRIVATE_TOOL_ERROR"), { code: "interaction_required" });
+  }));
+  await tracer.flush();
+  for (const span of c.spans.slice(0, 2)) {
+    assert.equal(span.metadata.status, "waiting");
+    assert.equal(span.metadata.errorCode, undefined);
+    assert.notEqual(span.status.code, 2);
+  }
+  assert.equal(c.spans[2].metadata.status, "failed");
+  assert.equal(c.spans[2].status.code, 2);
+  assert.doesNotMatch(JSON.stringify(c.requests), /PRIVATE|continuation|options|harness/);
+  await tracer.close();
+});
+
+test("actual Deep Agents interruption keeps automatic framework spans out of the failure path", async () => {
+  const c = collector();
+  const tracer = new PhoenixExecutionTracer({ enabled: true }, c.fetcher);
+  const f = nativeChat({ tracing: tracer, tools: [new AskUserTool()], respond: () => ({
+    content: "", toolCalls: [{ id: "question", name: "ask_user", arguments: {
+      question: "PRIVATE_QUESTION_BODY", options: [{ id: "one", label: "PRIVATE_OPTION_BODY" }], allowCustom: true,
+    } }],
+  }) });
+  try {
+    await assert.rejects(f.execution.runTask(f.snapshot,
+      { messages: [{ role: "user", content: "PRIVATE_TASK_BODY" }], versions: {}, limits: { maxDecisions: 4, maxToolCalls: 4 } },
+      { runId: "trace-wait", traceId: "trace-wait", interactionHost: { threadId: "trace-wait", checkpointer: new MemorySaver() } }),
+      (error) => error instanceof InteractionSuspension);
+    await tracer.flush();
+    assert.ok(c.spans.some((span) => span.attributes["app.layer"] === "framework" && span.attributes["app.status"] === "waiting"));
+    assert.ok(c.spans.some((span) => span.metadata.status === "waiting"));
+    assert.equal(c.spans.filter((span) => span.status.code === 2).length, 0);
+    assert.doesNotMatch(JSON.stringify(c.requests), /PRIVATE_|continuation|options|harness/);
+  } finally { await tracer.close(); }
 });
 
 test("local tracing needs no API key; disabled and zero sampling export nothing", async () => {

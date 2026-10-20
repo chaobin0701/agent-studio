@@ -27,6 +27,8 @@ export async function executeAgentChat(
       signal: input.signal,
       conversationId: input.conversationId,
       entryPoint: "chat",
+      interactionHost:input.interactionHost,
+      validateContextResource:input.validateContextResource,
       contextFiles: chatContextFiles(input, [...entry.tools.keys()]),
       validateContextFile: async (file, signal) => {
         if (!file.resource) return;

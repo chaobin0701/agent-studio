@@ -6,6 +6,7 @@ import {
   Logger,
   NotFoundException,
   OnApplicationShutdown,
+  Optional,
 } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
 import type { PoolClient } from "pg";
@@ -35,6 +36,9 @@ import type {
   ChatbotPrincipal,
   ChatbotTurn,
 } from "./chatbot.types";
+import { InteractionService } from "../interactions/interaction.service";
+import { InteractionWaiting, type PublicInteraction } from "../interactions/contracts";
+import { lifecycleWriteLock } from "../agent-management/resource-lifecycle";
 
 const sendSchema = z
   .object({
@@ -48,7 +52,7 @@ const sendSchema = z
     (input) => input.message.length > 0 || input.attachmentIds.length > 0,
   );
 const turnColumns = `t.id,t.session_id AS "sessionId",t.request_id AS "requestId",t.request_fingerprint AS "requestFingerprint",t.question,t.partial_answer AS "partialAnswer",t.progress,
- CASE WHEN c.status='completed' THEN 'completed' WHEN t.status='cancelled' THEN 'cancelled' WHEN c.status='expired' OR (c.status='running' AND c.expires_at<=now()) THEN 'expired' WHEN c.status='failed' THEN 'failed' ELSE t.status END AS status,
+ CASE WHEN c.status='completed' THEN 'completed' WHEN t.status='cancelled' THEN 'cancelled' WHEN c.status='expired' OR (c.status IN ('running','waiting') AND c.expires_at<=now()) THEN 'expired' WHEN c.status='failed' THEN 'failed' WHEN c.status='waiting' THEN 'waiting' ELSE t.status END AS status,
  COALESCE(t.response,c.response) AS response,t.error_code AS "errorCode",t.error_message AS "errorMessage",t.agent_version_id::int AS "agentVersionId",v.version AS "agentVersion",c.trace_id AS "traceId",t.created_at AS "createdAt",t.finished_at AS "finishedAt"`;
 const principalWhere = `s.admin_actor_id IS NOT DISTINCT FROM $2::bigint AND s.application_id IS NOT DISTINCT FROM $3::uuid AND s.visitor_session_id IS NOT DISTINCT FROM $4::uuid`;
 type Active = {
@@ -74,6 +78,7 @@ export class ChatbotService implements OnApplicationShutdown {
     private readonly limiter: SecurityRateLimitService,
     private readonly artifacts: ExecutionArtifactService,
     private readonly attachments: ChatbotAttachmentService,
+    @Optional() private readonly interactions?: InteractionService,
   ) {}
   private principal(p: ChatbotPrincipal) {
     return "adminId" in p
@@ -197,7 +202,7 @@ export class ChatbotService implements OnApplicationShutdown {
     const runIds = await this.db.transaction(async (c) => {
       await this.session(p, id, c, true);
       const running = await c.query<{ id: string }>(
-        "UPDATE chatbot_turns SET cancel_requested_at=now() WHERE session_id=$1 AND status='running' RETURNING id",
+        "UPDATE chatbot_turns SET cancel_requested_at=now() WHERE session_id=$1 AND status IN ('running','waiting') RETURNING id",
         [id],
       );
       await c.query(
@@ -207,8 +212,10 @@ export class ChatbotService implements OnApplicationShutdown {
       await this.audit(c, p, "deleted", id);
       return running.rows.map((r) => r.id);
     });
-    for (const runId of runIds)
+    for (const runId of runIds) {
       this.active.get(runId)?.abort.abort(new Error("Conversation deleted"));
+      if(!this.active.has(runId)) { await this.interactions?.cancel(runId);await this.access.finish(runId,null); }
+    }
     return { ok: true };
   }
   async detail(p: ChatbotPrincipal, id: string) {
@@ -220,10 +227,11 @@ export class ChatbotService implements OnApplicationShutdown {
       )
     ).rows;
     const attachments = await this.attachments.forTurns(id);
+    const interactions=await this.interactions?.listMany(turns.map(t=>t.id));
     return {
       session,
       messages: turns
-        .flatMap((t) => this.messages(t))
+        .flatMap((t) => this.messages(t,interactions?.get(t.id)??[]))
         .map((message) => ({
           ...message,
           attachments:
@@ -232,10 +240,10 @@ export class ChatbotService implements OnApplicationShutdown {
               : [],
         })),
       attachments: await this.attachments.list(id),
-      activeRunId: turns.find((t) => t.status === "running")?.id ?? null,
+      activeRunId: turns.find((t) => t.status === "running" || t.status === "waiting")?.id ?? null,
     };
   }
-  private messages(t: ChatbotTurn) {
+  private messages(t: ChatbotTurn,interactions:PublicInteraction[]=[]) {
     const response = t.response ? this.runs.publicResult(t.response) : null;
     return [
       {
@@ -257,6 +265,7 @@ export class ChatbotService implements OnApplicationShutdown {
         traceId: t.traceId,
         agentVersion: t.agentVersion,
         progress: t.progress,
+        interactions,
         error:
           t.errorMessage ??
           (t.status === "expired"
@@ -284,6 +293,7 @@ export class ChatbotService implements OnApplicationShutdown {
     const { requestFingerprint: _fingerprint, ...visible } = row;
     return {
       ...visible,
+      interactions:await this.interactions?.list(runId)??[],
       response: row.response ? this.runs.publicResult(row.response) : null,
     };
   }
@@ -314,7 +324,7 @@ export class ChatbotService implements OnApplicationShutdown {
       if (
         (
           await c.query(
-            "SELECT 1 FROM chatbot_turns t JOIN integration_calls c ON c.id=t.id WHERE t.session_id=$1 AND t.status='running' AND c.status='running' AND c.expires_at>now()",
+            "SELECT 1 FROM chatbot_turns t JOIN integration_calls c ON c.id=t.id WHERE t.session_id=$1 AND t.status IN ('running','waiting') AND c.status IN ('running','waiting') AND c.expires_at>now()",
             [sessionId],
           )
         ).rowCount
@@ -418,6 +428,7 @@ export class ChatbotService implements OnApplicationShutdown {
     sessionId: string,
     runId: string,
     prepared: PreparedRun,
+    releaseSlot?: () => void,
   ) {
     const active: Active = {
       abort: new AbortController(),
@@ -488,7 +499,7 @@ export class ChatbotService implements OnApplicationShutdown {
         | Awaited<ReturnType<AgentRunService["execute"]>>
         | undefined;
       try {
-        const response = await this.limiter.runConcurrent("chat", () =>
+        const execute = () =>
           this.runs.execute(prepared, active.abort.signal, {
             onAnswerDelta: (text) => {
               active.answer = (active.answer + text).slice(0, 200000);
@@ -529,8 +540,10 @@ export class ChatbotService implements OnApplicationShutdown {
                 id: event.id,
                 text: event.text.slice(0, 2000),
               }),
-          }),
-        );
+          });
+        const response = releaseSlot
+          ? await execute()
+          : await this.limiter.runConcurrent("chat", execute);
         completed = this.runs.publicResult(response);
         await flush();
         await this.db.query(
@@ -543,6 +556,12 @@ export class ChatbotService implements OnApplicationShutdown {
         );
         emit("done", this.runs.publicResult(response));
       } catch (error) {
+        if(error instanceof InteractionWaiting) {
+          await flush();
+          await this.db.query("UPDATE chatbot_turns SET status='waiting',finished_at=NULL WHERE id=$1 AND status='running'",[runId]);
+          emit("interaction_required",{runId,interaction:error.interaction});
+          return;
+        }
         // The execution ledger is authoritative. A failed UI checkpoint must
         // never turn completed tools into a retryable failed execution.
         if (completed) {
@@ -580,6 +599,7 @@ export class ChatbotService implements OnApplicationShutdown {
         clearInterval(watchCancellation);
         clearTimeout(active.flush);
         this.active.delete(runId);
+        releaseSlot?.();
       }
     })().catch(() =>
       this.logger.warn("Chat background execution persistence failed"),
@@ -594,13 +614,52 @@ export class ChatbotService implements OnApplicationShutdown {
     return () => active.listeners.delete(listener);
   }
   async cancel(p: ChatbotPrincipal, sessionId: string, runId: string) {
-    await this.turn(p, sessionId, runId);
+    const turn=await this.turn(p, sessionId, runId);
+    if(turn.status==="waiting") {
+      const pending=turn.interactions.find(card=>card.status==="pending");
+      if(!this.interactions||!pending)throw new ConflictException("交互已处理，请刷新后查看当前执行");
+      await this.interactions.cancelWaiting(runId,pending.id,async(c)=>{
+        await lifecycleWriteLock(c);
+        if(!(await c.query("SELECT id FROM integration_calls WHERE id=$1 AND status='waiting' AND expires_at>now() FOR UPDATE",[runId])).rowCount)
+          throw new ConflictException("原执行已继续或过期，不能取消历史交互");
+        await this.access.finish(runId,null,0,c);
+        const cancelled=await c.query("UPDATE chatbot_turns SET status='cancelled',cancel_requested_at=now(),finished_at=now(),error_code='run_cancelled',error_message='已停止执行' WHERE id=$1 AND status='waiting' RETURNING id",[runId]);
+        if(!cancelled.rowCount)throw new ConflictException("会话执行已继续，不能取消历史交互");
+      });
+      return {ok:true};
+    }
     await this.db.query(
       "UPDATE chatbot_turns t SET cancel_requested_at=now() FROM integration_calls c WHERE t.id=$1 AND c.id=t.id AND t.status='running' AND c.status='running'",
       [runId],
     );
     this.active.get(runId)?.abort.abort(new Error("Stopped by user"));
     return { ok: true };
+  }
+  async respond(p:ChatbotPrincipal,sessionId:string,runId:string,interactionId:string,value:unknown) {
+    const turn=await this.turn(p,sessionId,runId);
+    if(!value || typeof value!=="object" || !("interactionId" in value) || value.interactionId!==interactionId) throw new BadRequestException("交互标识与请求路径不一致");
+    const session=await this.session(p,sessionId);
+    if(!session.agentEnabled) throw new ForbiddenException("Agent 已停用，不能继续执行");
+    let chatContext:PreparedRun["chatContext"];
+    if(turn.status==="waiting") {
+      const composition=await this.management.snapshotPinned(session.agentId,turn.agentVersionId);
+      const linked=(await this.attachments.forTurns(sessionId)).filter(a=>a.turnId===runId).map(a=>a.id);
+      const resources=await this.attachments.resolve(sessionId,linked,composition);
+      chatContext={contextFiles:resources.contextFiles,images:resources.images,validateContextFile:async(file,signal)=>{signal.throwIfAborted();await this.session(p,sessionId);await this.attachments.validate(sessionId,file.reference!.id);}};
+    }
+    const releaseSlot=this.limiter.acquireConcurrent("chat");
+    let handedOff=false;
+    try {
+      const resumed=await this.runs.prepareResumeForChatbot(p,runId,value,chatContext);
+      if(resumed.prepared) {
+        await this.db.query("UPDATE chatbot_turns SET status='running',finished_at=NULL,error_code=NULL,error_message=NULL WHERE id=$1 AND status='waiting'",[runId]);
+        this.launch(p,sessionId,runId,resumed.prepared,releaseSlot);
+        handedOff=true;
+      }
+      return {runId,replayed:resumed.replayed,stream:true};
+    } finally {
+      if(!handedOff)releaseSlot();
+    }
   }
   async upload(
     p: ChatbotPrincipal,

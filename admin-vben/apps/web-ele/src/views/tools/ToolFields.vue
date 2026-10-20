@@ -20,10 +20,16 @@ import JsonValueEditor from "#/components/JsonValueEditor.vue";
 import { validateHeaders } from "#/components/json-validation";
 import CredentialPicker from "./CredentialPicker.vue";
 import SchemaEditor from "./SchemaEditor.vue";
+import {
+  builtinToolConfig,
+  httpToolConfig,
+  type BuiltinToolOption,
+} from "./create-config";
 const config = defineModel<any>({ required: true });
 const props = defineProps<{
   options: any;
   disabled?: boolean;
+  creating?: boolean;
   section?: "all" | "connection" | "parameters" | "result" | "runtime";
 }>();
 const show = (section: string) =>
@@ -38,6 +44,26 @@ watch(
   },
 );
 const remote = computed(() => config.value.type === "mcp");
+const questionTool = computed(
+  () => config.value.type === "builtin" && config.value.target === "ask_user",
+);
+const builtinOptions = computed<BuiltinToolOption[]>(
+  () => props.options?.tools ?? [],
+);
+function selectBuiltin(target: string) {
+  if (!props.creating || props.disabled) return;
+  config.value = builtinToolConfig(builtinOptions.value, target);
+}
+function selectType(type: string) {
+  if (!props.creating || props.disabled || config.value.type === type) return;
+  if (type === "rest") config.value = httpToolConfig();
+  else if (type === "builtin") {
+    const option =
+      builtinOptions.value.find((item) => item.key === "ask_user") ??
+      builtinOptions.value[0];
+    if (option) selectBuiltin(option.key);
+  }
+}
 const outputEnabled = computed({
   get: () => !!config.value.outputSchema,
   set: (value) => {
@@ -71,14 +97,46 @@ function credential(value: number | undefined) {
 <template>
   <div v-show="show('connection')">
     <ElFormItem label="工具类型"
-      ><span>{{
+      ><ElSelect
+        v-if="creating"
+        :model-value="config.type"
+        :disabled="disabled"
+        @change="selectType"
+      >
+        <ElOption value="rest" label="HTTP 工具" />
+        <ElOption
+          value="builtin"
+          label="内置工具"
+          :disabled="!builtinOptions.length"
+        /> </ElSelect
+      ><span v-else>{{
         config.type === "rest"
           ? "HTTP 工具"
           : config.type === "builtin"
-            ? "内置业务工具"
+            ? "内置工具"
             : "MCP 工具"
       }}</span></ElFormItem
     >
+    <ElFormItem
+      v-if="creating && config.type === 'builtin'"
+      label="内置工具"
+      required
+    >
+      <ElSelect
+        :model-value="config.target"
+        filterable
+        :disabled="disabled"
+        placeholder="选择已注册的内置工具"
+        @change="selectBuiltin"
+      >
+        <ElOption
+          v-for="tool in builtinOptions"
+          :key="tool.key"
+          :value="tool.key"
+          :label="tool.key === 'ask_user' ? 'ask_user · 向用户提问' : tool.key"
+        />
+      </ElSelect>
+    </ElFormItem>
     <ElFormItem label="用途 / 使用时机" required
       ><ElInput
         v-model="config.description"
@@ -284,8 +342,10 @@ function credential(value: number | undefined) {
           long
       /></ElFormItem>
       <ElFormItem label="调用前需批准"
-        ><ElSwitch v-model="config.requiresApproval" /><HelpTip
-          text="开启后，未批准的请求不会调用服务，与是否只读独立。后台真实测试可确认批准本次调用；访客审批交互尚未接入。"
+        ><ElSwitch
+          v-model="config.requiresApproval"
+          :disabled="disabled || questionTool" /><HelpTip
+          text="开启后，执行会在调用此工具前等待用户批准；批准仅适用于本次调用及其参数，与是否只读独立。后台真实测试也需确认批准本次调用。修改后需发布新版本并更新 Agent。"
           long
       /></ElFormItem>
     </div>
@@ -318,6 +378,7 @@ function credential(value: number | undefined) {
           :max="3"
           :disabled="
             disabled ||
+            questionTool ||
             (!config.readOnly &&
               (config.type !== 'rest' || !config.idempotencyHeader))
           " /><HelpTip

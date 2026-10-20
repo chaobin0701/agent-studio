@@ -4,13 +4,25 @@ import { Bubble, FilesCard } from "vue-element-plus-x";
 import { ElButton, ElTag, ElMessage, ElImage } from "element-plus";
 import DOMPurify from "dompurify";
 import { Marked } from "marked";
-import type { ChatTurn } from "./types";
+import ChatInteraction from "./ChatInteraction.vue";
+import type { ChatTurn, ChatInteractionResponse } from "./types";
 import "./styles.css";
 const props = withDefaults(
-  defineProps<{ message: ChatTurn; showInspect?: boolean }>(),
-  { showInspect: true },
+  defineProps<{
+    message: ChatTurn;
+    showInspect?: boolean;
+    interactionDisabled?: boolean;
+    interactionRespondingId?: string;
+    interactionErrors?: Record<string, string>;
+  }>(),
+  { showInspect: true, interactionDisabled: true },
 );
-defineEmits<{ download: [id: string]; inspect: [traceId: string] }>();
+defineEmits<{
+  download: [id: string];
+  inspect: [traceId: string];
+  respond: [response: ChatInteractionResponse];
+  cancelInteraction: [];
+}>();
 const markdown = new Marked({ renderer: { html: () => "" } });
 const html = computed(() =>
   DOMPurify.sanitize(markdown.parse(props.message.content, { async: false }), {
@@ -51,6 +63,18 @@ async function copy() {
         v-html="html"
       />
       <div v-else class="chatbot-plain">{{ message.content }}</div>
+      <template v-if="message.role === 'assistant'">
+        <ChatInteraction
+          v-for="interaction in message.interactions"
+          :key="interaction.id"
+          :interaction="interaction"
+          :disabled="interactionDisabled || !!interactionRespondingId"
+          :submitting="interactionRespondingId === interaction.id"
+          :error="interactionErrors?.[interaction.id]"
+          @respond="$emit('respond', $event)"
+          @cancel="$emit('cancelInteraction')"
+        />
+      </template>
       <div v-if="message.attachments?.length" class="chatbot-message-files">
         <FilesCard
           v-for="file in message.attachments"

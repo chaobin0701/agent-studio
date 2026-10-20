@@ -1577,8 +1577,10 @@ test(
             assert.ok(logs.some((l) => l.action === "integration.key_rotated"));
             assert.ok(logs.some((l) => l.action === "integration.key_revoked"));
             assert.ok(!JSON.stringify(logs).includes(key.apiKey));
+            const interactionMigration=await readFile(new URL('../migrations/0060_human_interactions.sql',import.meta.url),'utf8');
             const chatbotMigration=await readFile(new URL('../migrations/0058_chatbot_sessions.sql',import.meta.url),'utf8');
             const attachmentMigration=await readFile(new URL('../migrations/0059_chatbot_attachments.sql',import.meta.url),'utf8');
+            await db.platformQuery(interactionMigration.split('-- Down Migration')[1]);
             await db.platformQuery(attachmentMigration.split('-- Down Migration')[1]);
             await db.platformQuery(chatbotMigration.split('-- Down Migration')[1]);
             await db.platformQuery(tokenMigration.split("-- Down Migration")[1]);

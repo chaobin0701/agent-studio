@@ -12,7 +12,7 @@ import type { PromptRuntimeSnapshot } from '../prompts/prompt-runtime.service';
 import type { ContextEstimate } from './context-governor';
 import type { RetryStatusEvent } from './llm.service';
 import type {AgentArtifact,AgentReference,JsonValue} from '../ai/agent/execution-contract';
-export type ChatAgentContext = { signal?: AbortSignal; compositionSnapshot?: CompositionSnapshot; conversationId?: string; traceId?: string; runId?: string; priorTranscript?: AgentTranscriptMessage[]; configurationSnapshot?: AgentConfigurationSnapshot; promptSnapshot?: PromptRuntimeSnapshot; requestContext?: RequestContext; contextBlocks?: RuntimeContextBlock[]; currentContextBlocks?: RuntimeContextBlock[] };
+export type ChatAgentContext = { interactionHost?:import('../interactions/contracts').RuntimeInteractionHost;signal?: AbortSignal; compositionSnapshot?: CompositionSnapshot; conversationId?: string; traceId?: string; runId?: string; priorTranscript?: AgentTranscriptMessage[]; configurationSnapshot?: AgentConfigurationSnapshot; promptSnapshot?: PromptRuntimeSnapshot; requestContext?: RequestContext; contextBlocks?: RuntimeContextBlock[]; currentContextBlocks?: RuntimeContextBlock[] };
 export { validateAnswer } from '../ai/agent/citation-validation';
 
 export type Citation = Pick<SearchHit, 'chunkId' | 'documentId' | 'documentTitle' | 'originalFilename' | 'sourceStartLine' | 'sourceEndLine'>;
@@ -34,6 +34,10 @@ export type PublicProgressEvent = {
 export type ProcessEvent = ({ type: 'tool' } & ToolStep) | CommentaryEvent | PublicProgressEvent;
 export type ChatAnswer = { answer: string; refused: boolean; citations: Citation[]; artifacts?:AgentArtifact[];references?:AgentReference[];structured?:JsonValue;toolSteps?: ToolStep[]; progressEvents?: ProcessEvent[]; context?: ContextEstimate };
 export type ChatStreamCallbacks = {
+  /** Server-owned continuation bridge; never accepted from public JSON. */
+  interactionHost?: import('../interactions/contracts').RuntimeInteractionHost;
+  executionTraceId?: string;
+  integrationCallId?: string;
   /** Trusted transport cancellation, never read from request JSON. */
   signal?: AbortSignal;
   onAnswerStarted?: (metadata: { citations: Citation[] }) => void;

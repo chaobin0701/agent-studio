@@ -30,7 +30,12 @@ function fixture() {
   let turns = [],
     failSend = false,
     complete = false,
-    uploads = 0;
+    uploads = 0,
+    interactions = [],
+    eventListener,
+    responseFailure;
+  const pendingInteraction = () =>
+    interactions.find((i) => i.status === "pending");
   const api = {
     async request(method, path, body) {
       calls.push({ method, path, body });
@@ -75,17 +80,61 @@ function fixture() {
         ];
         return { id: runId };
       }
-      if (path.endsWith("/cancel")) return { ok: true };
+      if (path.endsWith("/cancel")) {
+        interactions = interactions.map((i) =>
+          i.status === "pending" ? { ...i, status: "cancelled" } : i,
+        );
+        complete = true;
+        return { ok: true };
+      }
+      if (method === "POST" && path.endsWith("/respond")) {
+        if (responseFailure === "pending")
+          throw Object.assign(Error("network uncertainty"), { status: 503 });
+        interactions = interactions.map((i) =>
+          i.id === body.interactionId
+            ? {
+                ...i,
+                status:
+                  body.kind === "approval"
+                    ? body.decision === "approve"
+                      ? "approved"
+                      : "rejected"
+                    : "answered",
+                ...(body.kind === "question"
+                  ? {
+                      answer: body.optionId
+                        ? { optionId: body.optionId }
+                        : { text: body.text },
+                    }
+                  : {}),
+              }
+            : i,
+        );
+        if (responseFailure === "accepted")
+          throw Object.assign(Error("lost acknowledgement"), { status: 503 });
+        return { runId, replayed: false, stream: "/events" };
+      }
       if (method === "GET" && path.includes("/runs/"))
         return {
-          status: complete ? "completed" : "running",
+          status: complete
+            ? "completed"
+            : pendingInteraction()
+              ? "waiting"
+              : "running",
           partialAnswer: "",
+          interactions,
         };
       if (method === "GET" && path.startsWith("/sessions/"))
         return {
           session: sessions.find((s) => s.id === path.split("/")[2]),
           messages: turns.map((t) => ({
             ...t,
+            ...(t.role === "assistant"
+              ? {
+                  interactions,
+                  status: pendingInteraction() ? "waiting" : t.status,
+                }
+              : {}),
             ...(complete && t.role === "assistant"
               ? { content: "Done", status: "completed" }
               : {}),
@@ -96,6 +145,14 @@ function fixture() {
       throw Error("Unexpected fixture request " + path);
     },
     async events(_path, onEvent, signal) {
+      eventListener = onEvent;
+      if (pendingInteraction()) {
+        onEvent("interaction_required", {
+          runId,
+          interaction: pendingInteraction(),
+        });
+        return;
+      }
       if (complete) {
         onEvent("done", {});
         return;
@@ -135,6 +192,36 @@ function fixture() {
       complete = true;
     },
     uploads: () => uploads,
+    waitFor: (kind = "question") => {
+      const interaction = {
+        id: randomUUID(),
+        runId,
+        kind,
+        status: "pending",
+        revision: 1,
+        expiresAt: new Date(Date.now() + 60_000).toISOString(),
+        ...(kind === "question"
+          ? {
+              question: "你的预算是多少？",
+              options: [
+                { id: "budget-1", label: "2000 元以内" },
+                { id: "budget-2", label: "2000–3000 元" },
+              ],
+              allowCustom: true,
+            }
+          : {
+              toolName: "submit_request",
+              description: "提交申请",
+              arguments: { amount: 2499 },
+            }),
+      };
+      interactions.push(interaction);
+      eventListener?.("interaction_required", { runId, interaction });
+      return interaction;
+    },
+    failResponse: (mode) => {
+      responseFailure = mode;
+    },
   };
 }
 
@@ -315,4 +402,219 @@ test("XSender replacement clears instead of inserting and restores session draft
   await mod.exports.replaceSenderText(sender, "saved\ndraft");
   assert.equal(text, "saved\ndraft");
   assert.equal(replacements, 2);
+});
+
+test("waiting SSE retains the active task, restores its card after reload and does not resend a normal message", async () => {
+  const f = fixture(),
+    first = createChatbotClient(f.api, "waiting", f.storage);
+  await first.initialize();
+  first.draft("help me choose");
+  await first.send();
+  const question = f.waitFor();
+  await pause();
+  assert.equal(first.current().runStatus, "waiting");
+  assert.equal(first.current().runId, f.runId);
+  assert.equal(first.current().messages.at(-1).interactions[0].id, question.id);
+  first.draft("keep this draft");
+  await first.send();
+  assert.equal(f.calls.filter((r) => r.path.endsWith("/messages")).length, 1);
+  const reads = f.calls.filter((r) => r.path.includes("/runs/")).length;
+  await pause();
+  assert.equal(f.calls.filter((r) => r.path.includes("/runs/")).length, reads);
+  first.dispose();
+  const recovered = createChatbotClient(f.api, "waiting", f.storage);
+  try {
+    await recovered.initialize();
+    assert.equal(recovered.current().runStatus, "waiting");
+    assert.equal(recovered.current().draft, "keep this draft");
+    await recovered.respond({
+      kind: "question",
+      interactionId: question.id,
+      revision: 1,
+      optionId: "budget-2",
+    });
+    const post = f.calls.find((r) => r.path.endsWith("/respond"));
+    assert.deepEqual(post.body, {
+      kind: "question",
+      interactionId: question.id,
+      revision: 1,
+      optionId: "budget-2",
+    });
+    assert.equal(recovered.current().runStatus, "running");
+    assert.equal(
+      recovered.current().messages.at(-1).interactions[0].status,
+      "answered",
+    );
+    assert.equal(recovered.current().draft, "keep this draft");
+  } finally {
+    recovered.dispose();
+  }
+});
+
+test("approval submits only its bound decision, deduplicates clicks and retains the historical result", async () => {
+  const f = fixture(),
+    c = createChatbotClient(f.api, "approval", f.storage);
+  try {
+    await c.initialize();
+    c.draft("submit");
+    await c.send();
+    const approval = f.waitFor("approval");
+    await pause();
+    const response = {
+      kind: "approval",
+      interactionId: approval.id,
+      revision: 1,
+      decision: "approve",
+      arguments: { amount: 1 },
+      approvedTools: ["anything"],
+    };
+    await Promise.all([c.respond(response), c.respond(response)]);
+    const posts = f.calls.filter((r) => r.path.endsWith("/respond"));
+    assert.equal(posts.length, 1);
+    assert.deepEqual(posts[0].body, {
+      kind: "approval",
+      interactionId: approval.id,
+      revision: 1,
+      decision: "approve",
+    });
+    assert.equal(
+      c.current().messages.at(-1).interactions[0].status,
+      "approved",
+    );
+    assert.equal(
+      c.current().messages.at(-1).interactions[0].arguments.amount,
+      2499,
+    );
+    await c.respond(response);
+    assert.equal(f.calls.filter((r) => r.path.endsWith("/respond")).length, 1);
+  } finally {
+    c.dispose();
+  }
+});
+
+test("uncertain interaction responses reconcile by GET and remain explicit without replaying tools or messages", async () => {
+  const f = fixture(),
+    c = createChatbotClient(f.api, "uncertain-interaction", f.storage);
+  try {
+    await c.initialize();
+    c.draft("choose");
+    await c.send();
+    const question = f.waitFor();
+    await pause();
+    f.failResponse("pending");
+    const response = {
+      kind: "question",
+      interactionId: question.id,
+      revision: 1,
+      text: "2500 元",
+    };
+    await c.respond(response);
+    assert.match(
+      c.current().interactionErrors[question.id],
+      /提交结果尚未确认/,
+    );
+    assert.equal(c.current().runStatus, "waiting");
+    await pause();
+    assert.equal(f.calls.filter((r) => r.path.endsWith("/respond")).length, 1);
+    assert.equal(f.calls.filter((r) => r.path.endsWith("/messages")).length, 1);
+    f.failResponse("accepted");
+    await c.respond(response);
+    assert.equal(
+      c.current().messages.at(-1).interactions[0].status,
+      "answered",
+    );
+    assert.equal(c.current().interactionErrors[question.id], undefined);
+    assert.equal(
+      c.current().messages.at(-1).interactions[0].answer.text,
+      "2500 元",
+    );
+  } finally {
+    c.dispose();
+  }
+});
+
+test("only the active pending interaction can be answered and cancelling a waiting task updates history", async () => {
+  const f = fixture(),
+    c = createChatbotClient(f.api, "isolation", f.storage);
+  try {
+    await c.initialize();
+    c.draft("choose");
+    await c.send();
+    const question = f.waitFor();
+    await pause();
+    await c.respond({
+      kind: "question",
+      interactionId: randomUUID(),
+      revision: 1,
+      text: "forged",
+    });
+    await c.respond({
+      kind: "question",
+      interactionId: question.id,
+      revision: 2,
+      text: "stale",
+    });
+    await c.respond({
+      kind: "question",
+      interactionId: question.id,
+      revision: 1,
+      optionId: "unknown",
+    });
+    assert.equal(f.calls.filter((r) => r.path.endsWith("/respond")).length, 0);
+    await c.cancel();
+    assert.equal(
+      c.current().messages.at(-1).interactions[0].status,
+      "cancelled",
+    );
+    assert.equal(c.current().runId, null);
+    c.newConversation();
+    await c.respond({
+      kind: "question",
+      interactionId: question.id,
+      revision: 1,
+      text: "different session",
+    });
+    assert.equal(f.calls.filter((r) => r.path.endsWith("/respond")).length, 0);
+  } finally {
+    c.dispose();
+  }
+});
+
+test("one task can ask a question and later request approval while preserving both cards", async () => {
+  const f = fixture(),
+    c = createChatbotClient(f.api, "sequential-interactions", f.storage);
+  try {
+    await c.initialize();
+    c.draft("help and submit");
+    await c.send();
+    const question = f.waitFor();
+    await pause();
+    await c.respond({
+      kind: "question",
+      interactionId: question.id,
+      revision: 1,
+      optionId: "budget-1",
+    });
+    const approval = f.waitFor("approval");
+    await pause();
+    assert.equal(c.current().runStatus, "waiting");
+    assert.equal(c.current().messages.at(-1).interactions.length, 2);
+    await c.respond({
+      kind: "approval",
+      interactionId: approval.id,
+      revision: 1,
+      decision: "reject",
+    });
+    assert.deepEqual(
+      c
+        .current()
+        .messages.at(-1)
+        .interactions.map((i) => i.status),
+      ["answered", "rejected"],
+    );
+    assert.equal(f.calls.filter((r) => r.path.endsWith("/messages")).length, 1);
+    assert.equal(c.current().runStatus, "running");
+  } finally {
+    c.dispose();
+  }
 });

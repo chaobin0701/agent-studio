@@ -12,11 +12,12 @@ import { ConversationService } from './conversation.service';
 import { ChatApplicationService } from './chat-application.service';
 import { AgentSettingsService } from '../config/agent-settings.service';
 import { LegacyWebsiteGuard } from '../integrations/integration.guards';
-import { IntegrationChatGateway } from './integration-chat.gateway';
+import { IntegrationChatGateway,type PreparedChat } from './integration-chat.gateway';
 import type { IntegrationRequest } from '../integrations/integration.types';
 import { IntegrationService } from '../integrations/integration.service';
 import { hasRetryErrorMetadata, publicIntegrationError } from '../integrations/quota-error';
 import type { RequestContext } from './request-context';
+import { InteractionWaiting } from '../interactions/contracts';
 
 @Controller('chat')
 @UseGuards(LegacyWebsiteGuard)
@@ -112,6 +113,21 @@ export class ChatController {
     return this.respond(request, response, body.question, id, true, body.context);
   }
 
+  @Post('conversations/:id/interactions/:interactionId/respond') @HttpCode(200)
+  async respondInteraction(@Param('id',ParseUUIDPipe) id:string,@Param('interactionId',ParseUUIDPipe) interactionId:string,@Body() value:unknown,@Req() request:IntegrationRequest,@Res() response:Response) {
+    const owner=await this.conversations.session(request,response);
+    return this.rateLimit.run(request.ip||request.socket.remoteAddress||'unknown',async()=>{
+      const resumed=await this.gateway!.prepareResume(request.integration,owner,id,interactionId,value);
+      if(!resumed.prepared)return response.status(202).json({runId:resumed.runId,conversationId:id,replayed:true,interaction:resumed.interaction});
+      return this.respond(request,response,resumed.prepared.question,id,true,resumed.prepared.context,resumed.prepared,true);
+    });
+  }
+
+  @Post('conversations/:id/interactions/:interactionId/cancel') @HttpCode(200)
+  async cancelInteraction(@Param('id',ParseUUIDPipe) id:string,@Param('interactionId',ParseUUIDPipe) interactionId:string,@Req() request:IntegrationRequest,@Res({passthrough:true}) response:Response) {
+    return this.gateway!.cancelInteraction(request.integration,await this.conversations.session(request,response),id,interactionId);
+  }
+
   @Post()
   @HttpCode(200)
   ask(@Body() body: AskQuestionDto, @Req() request: Request, @Res({ passthrough: true }) response: Response) {
@@ -126,12 +142,15 @@ export class ChatController {
     return this.respond(request, response, body.question, undefined, true, body.context);
   }
 
-  private async respond(request: Request, response: Response, question: string, conversationId: string | undefined, stream: boolean, context?: RequestContext) {
+  private async respond(request: Request, response: Response, question: string, conversationId: string | undefined, stream: boolean, context?: RequestContext,preparedInput?:PreparedChat,executionSlotAcquired=false) {
     const owner = await this.conversations.session(request, response);
-    const prepared = await this.gateway!.prepare((request as IntegrationRequest).integration, owner, conversationId, question, this.idempotencyKey(request), context);
+    const prepared = preparedInput??await this.gateway!.prepare((request as IntegrationRequest).integration, owner, conversationId, question, this.idempotencyKey(request), context);
     try {
-      return await this.rateLimit.run(request.ip || request.socket.remoteAddress || 'unknown', async () => {
-        if (!stream) return this.gateway!.execute(prepared, this.requestId(request));
+      const task=async () => {
+        if (!stream) {
+          try{return await this.gateway!.execute(prepared,this.requestId(request));}
+          catch(error){if(error instanceof InteractionWaiting){response.status(202);return {runId:error.interaction.runId,conversationId:prepared.admission.conversationId,status:'waiting',interaction:error.interaction};}throw error;}
+        }
         this.beginStream(response);
         const transport = new AbortController();
         const disconnected = () => { if (!response.writableEnded) transport.abort(new Error('Client disconnected')); };
@@ -156,11 +175,18 @@ export class ChatController {
             onRetryStatus: event => this.writeEvent(response, 'retry_status', event),
           });
           await this.writeAnswerStream(response, answer, streamed);
-        } catch (error) { this.writeStreamError(response, error); }
+        } catch (error) {
+          if(error instanceof InteractionWaiting){this.writeEvent(response,'interaction_required',{runId:error.interaction.runId,interaction:error.interaction});if(!response.writableEnded)response.end();}
+          else this.writeStreamError(response,error);
+        }
         finally { response.off('close', disconnected); }
-      });
+      };
+      return executionSlotAcquired ? await task() : await this.rateLimit.run(request.ip || request.socket.remoteAddress || 'unknown',task);
     } catch (error) {
-      if (prepared.admission.callId) await this.access!.finish(prepared.admission.callId, null);
+      if (prepared.admission.callId) {
+        if(this.gateway?.cancelAdmission)await this.gateway.cancelAdmission(prepared);
+        else await this.access!.finish(prepared.admission.callId, null);
+      }
       throw error;
     }
   }

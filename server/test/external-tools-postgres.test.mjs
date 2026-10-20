@@ -293,6 +293,10 @@ test(
           "INSERT INTO workspaces(name)VALUES('Other external tools fixture')RETURNING id::int",
         )
       ).rows[0].id;
+      // Data migrations 0055/0056 disable row_security locally for their owner
+      // operations. This fixture shares one transaction, so restore enforcement
+      // before deliberately switching to the non-owner application role.
+      await client.query("SET LOCAL row_security=on");
       await client.query("SET LOCAL ROLE agent_studio_workspace_runtime");
       await client.query("SELECT set_config('app.workspace_id',$1,true)", [
         String(ws),

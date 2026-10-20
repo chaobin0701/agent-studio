@@ -1,5 +1,6 @@
 import { dirname, join } from "node:path";
 import { BaseCallbackHandler } from "@langchain/core/callbacks/base";
+import { GraphInterrupt } from "@langchain/langgraph";
 import { CallbackManager } from "@langchain/core/callbacks/manager";
 import { AsyncLocalStorageProviderSingleton } from "@langchain/core/singletons";
 import { OITracer } from "@arizeai/openinference-core";
@@ -45,6 +46,7 @@ const knownNodes = new Set([
   "SummarizationMiddleware.before_model",
   "PlatformExecutionGuard.before_model",
   "PlatformExecutionGuard.after_model",
+  "PlatformHumanInteraction.after_model",
   "SkillsMiddleware.before_agent",
   "SubAgentMiddleware.before_agent",
 ]);
@@ -80,7 +82,7 @@ class MetadataFrameworkCallbacks extends BaseCallbackHandler {
     tracer: Tracer,
     private readonly root: Context,
     readonly ownerSpanId: string,
-    metadata: Record<string, string | number | boolean | null>,
+    private readonly metadata: Record<string, string | number | boolean | null>,
     allowedNames: readonly string[],
   ) {
     super({ _awaitHandler: true });
@@ -247,6 +249,16 @@ class MetadataFrameworkCallbacks extends BaseCallbackHandler {
     return this.end("handleRetrieverEnd", [[], safeId(a[1])], a[1]);
   }
   handleChainError(...a: unknown[]) {
+    if (a[0] instanceof GraphInterrupt) {
+      const id = safeId(a[1]);
+      const context = id ? this.parent(id) : undefined;
+      const span = context ? this.spans.get(context.spanId) : undefined;
+      span?.setAttributes({ "app.status": "waiting", metadata: JSON.stringify({
+        ...this.metadata, framework: "openinference-langchain-4.1.4", status: "waiting",
+      }) });
+      // Native interrupt payloads never enter SDK error formatting or storage.
+      return this.end("handleChainEnd", [{}, id], a[1]);
+    }
     return this.end(
       "handleChainError",
       ["execution_failed", safeId(a[1])],

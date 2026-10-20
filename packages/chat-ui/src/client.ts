@@ -1,5 +1,11 @@
 import { reactive } from "vue";
-import type { ChatAttachment, ChatSession, ChatTurn } from "./types";
+import type {
+  ChatAttachment,
+  ChatSession,
+  ChatTurn,
+  ChatInteraction,
+  ChatInteractionResponse,
+} from "./types";
 
 export interface ChatbotApi {
   request<T>(method: string, path: string, body?: unknown): Promise<T>;
@@ -35,6 +41,9 @@ interface BufferState {
   draft: string;
   attachments: ChatAttachment[];
   runId: string | null;
+  runStatus: "running" | "waiting" | null;
+  respondingId?: string;
+  interactionErrors: Record<string, string>;
   loading: boolean;
   error: string;
   pending?: Pending;
@@ -45,6 +54,8 @@ const blank = (): BufferState => ({
   draft: "",
   attachments: [],
   runId: null,
+  runStatus: null,
+  interactionErrors: {},
   loading: false,
   error: "",
   loaded: false,
@@ -215,6 +226,16 @@ export function createChatbotClient(
       if (disposed) return;
       buffer.messages = detail.messages;
       buffer.runId = detail.activeRunId;
+      buffer.runStatus = buffer.runId
+        ? detail.messages.some(
+            (m) =>
+              m.runId === buffer.runId &&
+              (m.status === "waiting" ||
+                m.interactions?.some((i) => i.status === "pending")),
+          )
+          ? "waiting"
+          : "running"
+        : null;
       buffer.loaded = true;
       buffer.error = "";
       if (!state.sessions.some((s) => s.id === id))
@@ -244,7 +265,8 @@ export function createChatbotClient(
         }
       }
       void previewRecent(id, buffer);
-      if (buffer.runId) observe(id, buffer.runId);
+      if (buffer.runId && buffer.runStatus === "running")
+        observe(id, buffer.runId);
     } catch (error) {
       if (!disposed) buffer.error = message(error);
       throw error;
@@ -266,7 +288,8 @@ export function createChatbotClient(
     } catch {
       save("pending:" + id, null);
     }
-    if (!buffer.loaded || !buffer.runId) await load(id).catch(() => {});
+    if (!buffer.loaded || !buffer.runId || buffer.runStatus === "waiting")
+      await load(id).catch(() => {});
   }
   function newConversation(agentId = state.selectedAgentId) {
     if (state.creating) return;
@@ -351,6 +374,18 @@ export function createChatbotClient(
     const assistant = () =>
       buffer.messages.find((m) => m.id === runId + ":assistant");
     let terminal = false;
+    let waiting = false;
+    const interaction = (value: ChatInteraction) => {
+      const target = assistant();
+      if (!target || !value || value.runId !== runId) return;
+      target.interactions ??= [];
+      const index = target.interactions.findIndex((i) => i.id === value.id);
+      if (index < 0) target.interactions.push(value);
+      else target.interactions[index] = value;
+      target.status = "waiting";
+      buffer.runStatus = "waiting";
+      waiting = true;
+    };
     const event = (name: string, value: any) => {
       if (disposed || controller.signal.aborted) return;
       const target = assistant();
@@ -378,6 +413,12 @@ export function createChatbotClient(
       )
         buffer.error = value.state === "waiting" ? value.message : "";
       if (name === "done" || name === "error") terminal = true;
+      if (name === "interaction_required" && value?.interaction) {
+        interaction(value.interaction);
+        // A waiting stream has ended normally. Keep its active run so the
+        // composer cannot submit a new task or replay the original message.
+        controller.abort();
+      }
     };
     void (async () => {
       try {
@@ -386,10 +427,18 @@ export function createChatbotClient(
         /* reconnect by GET only */
       }
       let failures = 0;
-      while (!disposed && !controller.signal.aborted && !terminal) {
+      while (!disposed && !controller.signal.aborted && !terminal && !waiting) {
         try {
           const turn = await api.request<any>("GET", path);
           failures = 0;
+          if (turn.status === "waiting") {
+            for (const item of turn.interactions ??
+              (turn.interaction ? [turn.interaction] : []))
+              interaction(item);
+            buffer.runStatus = "waiting";
+            waiting = true;
+            break;
+          }
           if (turn.status !== "running") {
             terminal = true;
             break;
@@ -416,8 +465,11 @@ export function createChatbotClient(
           );
         });
       }
-      if (!disposed && terminal) {
-        buffer.runId = null;
+      if (!disposed && (terminal || waiting)) {
+        if (terminal) {
+          buffer.runId = null;
+          buffer.runStatus = null;
+        }
         await load(id).catch(() => {});
         await search().catch(() => {});
       }
@@ -426,8 +478,95 @@ export function createChatbotClient(
         if (!disposed) buffer.error = message(error);
       })
       .finally(() => {
-        observers.delete(runId);
+        if (observers.get(runId) === controller) observers.delete(runId);
       });
+  }
+  async function respond(response: ChatInteractionResponse) {
+    const id = state.activeId,
+      buffer = current();
+    if (
+      !id ||
+      !buffer.runId ||
+      buffer.respondingId ||
+      buffer.runStatus !== "waiting"
+    )
+      return;
+    const interaction = buffer.messages
+      .flatMap((m) => m.interactions ?? [])
+      .find(
+        (i) =>
+          i.id === response.interactionId &&
+          i.runId === buffer.runId &&
+          i.status === "pending",
+      );
+    if (
+      !interaction ||
+      interaction.revision !== response.revision ||
+      interaction.kind !== response.kind
+    )
+      return;
+    const runId = buffer.runId;
+    const body: ChatInteractionResponse =
+      response.kind === "approval"
+        ? {
+            kind: "approval",
+            interactionId: interaction.id,
+            revision: interaction.revision,
+            decision: response.decision,
+          }
+        : {
+            kind: "question",
+            interactionId: interaction.id,
+            revision: interaction.revision,
+            ...(response.optionId
+              ? { optionId: response.optionId }
+              : { text: response.text?.trim() }),
+          };
+    if (
+      body.kind === "approval" &&
+      !["approve", "reject"].includes(body.decision)
+    )
+      return;
+    if (
+      body.kind === "question" &&
+      !(body.optionId
+        ? interaction.options?.some((o) => o.id === body.optionId)
+        : interaction.allowCustom && body.text && body.text.length <= 4000)
+    )
+      return;
+    buffer.respondingId = interaction.id;
+    delete buffer.interactionErrors[interaction.id];
+    try {
+      await api.request(
+        "POST",
+        `/sessions/${id}/runs/${runId}/interactions/${interaction.id}/respond`,
+        body,
+      );
+      if (disposed) return;
+      observers.get(runId)?.abort();
+      observers.delete(runId);
+      await load(id);
+      await search();
+    } catch (error) {
+      if (disposed) return;
+      // An uncertain POST is reconciled by reading durable state. It is never
+      // retried automatically and cannot become an ordinary chat message.
+      await load(id).catch(() => {});
+      const currentInteraction = buffer.messages
+        .flatMap((m) => m.interactions ?? [])
+        .find((i) => i.id === interaction.id);
+      if (currentInteraction?.status === "pending") {
+        buffer.interactionErrors[interaction.id] =
+          message(error) +
+          ([400, 401, 403, 404, 409].includes(errorStatus(error))
+            ? "；请刷新后重试。"
+            : "；提交结果尚未确认。请先刷新状态，确认仍待处理后再提交同一答复。");
+      } else if (!currentInteraction) {
+        buffer.error = message(error);
+      }
+    } finally {
+      buffer.respondingId = undefined;
+    }
   }
   async function submit(pending: Pending) {
     const buffer = state.buffers[pending.sessionId];
@@ -586,13 +725,17 @@ export function createChatbotClient(
     }
   }
   async function cancel() {
+    const buffer = current();
+    if (buffer.respondingId) return;
     const id = state.activeId,
-      runId = current().runId;
+      runId = buffer.runId;
     if (id && runId)
       try {
         await api.request("POST", `/sessions/${id}/runs/${runId}/cancel`, {});
+        await load(id);
+        await search();
       } catch (error) {
-        current().error = message(error);
+        buffer.error = message(error);
       }
   }
   async function rename(id: string, title: string) {
@@ -658,6 +801,7 @@ export function createChatbotClient(
     refreshCapabilities,
     draft,
     send,
+    respond,
     upload,
     cancel,
     rename,

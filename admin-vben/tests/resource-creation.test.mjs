@@ -6,6 +6,7 @@ import {runInNewContext} from 'node:vm';
 import {newResourceKey,validResourceKey} from '../apps/web-ele/src/components/create-resource-key.ts';
 import {frontmatterSection} from '../apps/web-ele/src/views/resources/skill/frontmatter.ts';
 import {createDraftQueue} from '../apps/web-ele/src/composables/draft-queue.ts';
+import {httpToolConfig,toolTestExample} from '../apps/web-ele/src/views/tools/create-config.ts';
 const require=createRequire(new URL('../apps/web-ele/package.json',import.meta.url));
 const ts=require('typescript'),{ref,computed}=require('vue');
 const skillExports={};
@@ -19,7 +20,7 @@ function fixture(kind,post){
  const requests=[],navigated=[],guards=[];let allowDiscard=false;
  const route={params:{},meta:{resourceKind:kind},fullPath:'/'+kind+'s'};
  const context={ref,computed,watch(){},defineAsyncComponent(){},onBeforeUnmount(){},setTimeout,clearTimeout,URL,
-  newResourceKey,validResourceKey,createSkillDocument,skillCreateKey,createDraftQueue,
+  newResourceKey,validResourceKey,createSkillDocument,skillCreateKey,createDraftQueue,httpToolConfig,toolTestExample,
   useRoute:()=>route,useRouter:()=>({push:async path=>navigated.push(path)}),useAccessStore:()=>({accessCodes:['agent_config.manage','agent_tools.execute','prompts.manage']}),
   useUnsavedChanges:(dirty)=>{guards.push(dirty);return async()=>!dirty.value||allowDiscard;},
   api:{post:async(url,body)=>{requests.push({url,body:JSON.parse(JSON.stringify(body))});return post?post(url,body):{id:51,resourceId:51};}},

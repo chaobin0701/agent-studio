@@ -160,6 +160,13 @@ export class AdminChatbotController {
   ) {
     return this.chat.cancel(this.principal(r), id, runId);
   }
+  @Post("sessions/:id/runs/:runId/interactions/:interactionId/respond") respond(
+    @Req() r:AdminRequest,
+    @Param("id",ParseUUIDPipe) id:string,
+    @Param("runId",ParseUUIDPipe) runId:string,
+    @Param("interactionId",ParseUUIDPipe) interactionId:string,
+    @Body() value:unknown,
+  ) { return this.chat.respond(this.principal(r),id,runId,interactionId,value); }
   @Get("sessions/:id/runs/:runId/artifacts/:fileId") async artifact(
     @Req() r: AdminRequest,
     @Param("id", ParseUUIDPipe) id: string,
@@ -314,6 +321,14 @@ export class WebsiteChatbotController {
   ) {
     return this.chat.cancel(await this.principal(r, response), id, runId);
   }
+  @Post("sessions/:id/runs/:runId/interactions/:interactionId/respond") async respond(
+    @Req() r:IntegrationRequest,
+    @Res({passthrough:true}) response:Response,
+    @Param("id",ParseUUIDPipe) id:string,
+    @Param("runId",ParseUUIDPipe) runId:string,
+    @Param("interactionId",ParseUUIDPipe) interactionId:string,
+    @Body() value:unknown,
+  ) { return this.chat.respond(await this.principal(r,response),id,runId,interactionId,value); }
   @Get("sessions/:id/runs/:runId/artifacts/:fileId") async artifact(
     @Req() r: IntegrationRequest,
     @Param("id", ParseUUIDPipe) id: string,

@@ -37,14 +37,23 @@ export class SecurityRateLimitService {
 
   /** Platform identities have durable app/key quotas; retain the process-wide expensive-work ceiling. */
   async runConcurrent<T>(scope: RateLimitScope, task: () => Promise<T>): Promise<T> {
+    const release = this.acquireConcurrent(scope);
+    try { return await task(); }
+    finally { release(); }
+  }
+
+  /** Reserve before committing a resumable action. The caller may hand the slot
+   * to background execution; releasing twice is harmless. */
+  acquireConcurrent(scope: RateLimitScope): () => void {
     const active = this.active.get(scope) ?? 0;
     if (active >= this.policy(scope).concurrency) throw this.exceeded();
     this.active.set(scope, active + 1);
-    try {
-      return await task();
-    } finally {
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
       this.active.set(scope, Math.max(0, (this.active.get(scope) ?? 1) - 1));
-    }
+    };
   }
 
   private policy(scope: RateLimitScope): { windowMs: number; limit: number; concurrency: number } {

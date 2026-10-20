@@ -15,6 +15,7 @@ Agent Studio 负责资源版本、权限和执行；业务系统继续拥有自�
 | RAG 知识库闭环 | 文档上传后由 Worker 解析、分块并建立索引。支持 PostgreSQL 全文检索、pgvector 向量检索和混合检索，以 RRF 融合召回结果，并保留回答引用及索引版本。 |
 | 可复用 Skill | 将已发布的 Skill 指导与辅助资料绑定到 Agent，运行时作为只读虚拟文件按需读取；Skill 版本进入任务快照，不因资料内容获得额外工具权限。 |
 | HTTP / MCP 工具接入 | 管理 HTTP Tool 与远程 Streamable HTTP MCP 连接。工具经过契约发现、测试、发布和 Agent 授权；执行时校验参数、凭据、网络边界及调用预算。 |
+| 提问与工具审批 | 单 Agent 可暂停并请求用户选项或自由回答；需要审批的工具在调用前展示确认卡片。原生 LangGraph 检查点持久化到 PostgreSQL，答复后继续原任务，保留版本、用量与归属。 |
 | 多 Agent 协作 | 入口 Agent 可委派给已授权的成员 Agent。成员使用各自发布的模型、Prompt 和能力，执行次数、Token 与期限受共同预算约束。 |
 | 不可变发布快照 | 草稿可持续编辑；发布后固定 Agent 及其依赖版本。每次请求读取生效快照，历史版本、引用和运行记录可追溯。 |
 | 接入与运行治理 | 支持后台调试、访客聊天、应用 API 和独立 Run；工作区权限与 PostgreSQL RLS 隔离数据，提供 SSE 流式输出、用量记录及可选的本地 Phoenix 追踪。 |
@@ -53,6 +54,8 @@ npm run dev
 默认地址：管理后台 `http://localhost:8085`、聊天端 `http://localhost:8852`、API `http://localhost:3020`，PostgreSQL 本机端口 `5437`。首次登录后，先配置供应商连接与模型方案，再创建并发布 Prompt 和 Agent；需要对外聊天时，在后台创建接入应用，绑定已发布 Agent 并设置允许的 Origin。
 
 对外聊天地址为 `http://localhost:8852/?app=应用UUID`；生产路径为 `/chat/?app=应用UUID`。应用 ID 是公开标识，浏览器使用服务端签发的短期访客令牌，**不能放入平台 API Key**。测试和启动不会自动启用应用或扩大 Origin。
+
+需要交互式提问时，在工具管理创建并测试、发布内置 `ask_user`，再绑定到单 Agent；需要审批时开启相应工具的“调用前需批准”，按现有版本流程发布。共享聊天端与 Demo Hub 均支持卡片、刷新恢复及历史查看。配置方式、API 与支持边界见[补充信息与工具审批](docs/human-interactions.md)。
 
 ## 验证与部署
 

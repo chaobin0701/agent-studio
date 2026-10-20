@@ -11,6 +11,7 @@ import { WorkflowTestService } from "./workflow-test.service";
 import { WorkflowTestController } from "./workflow-test.controller";
 import { AgentPreviewService } from "./agent-preview.service";
 import { AgentPreviewController } from "./agent-preview.controller";
+import { InteractionModule } from "../interactions/interaction.module";
 
 @Module({
   imports: [
@@ -20,6 +21,7 @@ import { AgentPreviewController } from "./agent-preview.controller";
     IntegrationModule,
     TracingModule,
     ArtifactModule,
+    InteractionModule,
   ],
   controllers: [
     AgentRunController,

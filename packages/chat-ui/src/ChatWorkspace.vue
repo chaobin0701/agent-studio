@@ -13,7 +13,12 @@ import {
 import { replaceSenderText, type ChatSender } from "./sender-sync";
 import ChatMessage from "./ChatMessage.vue";
 import ChatSessions from "./ChatSessions.vue";
-import type { ChatAttachment, ChatSession, ChatTurn } from "./types";
+import type {
+  ChatAttachment,
+  ChatSession,
+  ChatTurn,
+  ChatInteractionResponse,
+} from "./types";
 import "./styles.css";
 const props = withDefaults(
   defineProps<{
@@ -23,6 +28,10 @@ const props = withDefaults(
     draft: string;
     attachments?: ChatAttachment[];
     busy?: boolean;
+    waiting?: boolean;
+    activeRunId?: string | null;
+    interactionRespondingId?: string;
+    interactionErrors?: Record<string, string>;
     loading?: boolean;
     disabled?: boolean;
     error?: string;
@@ -59,6 +68,8 @@ const emit = defineEmits<{
   removeAttachment: [id: string];
   download: [id: string];
   inspect: [traceId: string];
+  respond: [response: ChatInteractionResponse];
+  cancelInteraction: [];
 }>();
 const sidebar = ref(false),
   allSessions = ref(false);
@@ -243,6 +254,11 @@ watch(
             ><ChatMessage
               :message="item as ChatTurn"
               :show-inspect="showInspect"
+              :interaction-disabled="!activeRunId || item.runId !== activeRunId"
+              :interaction-responding-id="interactionRespondingId"
+              :interaction-errors="interactionErrors"
+              @respond="$emit('respond', $event)"
+              @cancel-interaction="$emit('cancelInteraction')"
               @download="$emit('download', $event)"
               @inspect="$emit('inspect', $event)" /></template
         ></BubbleList>
@@ -264,8 +280,8 @@ watch(
             ref="sender"
             variant="updown"
             :custom-style="{ minHeight: '72px', maxHeight: '180px' }"
-            :loading="busy"
-            :disabled="disabled || loading"
+            :loading="busy && !waiting"
+            :disabled="disabled || loading || waiting"
             :max-length="2000"
             placeholder="输入消息，或粘贴图片…"
             @change="changed"
@@ -326,7 +342,11 @@ watch(
                 </ElTooltip>
               </div> </template
             ><template #action-list
-              ><ElButton v-if="busy" @click="$emit('cancel')">停止生成</ElButton
+              ><ElButton
+                v-if="busy"
+                :disabled="!!interactionRespondingId"
+                @click="$emit('cancel')"
+                >{{ waiting ? "停止任务" : "停止生成" }}</ElButton
               ><ElButton
                 v-else
                 type="primary"
@@ -337,6 +357,9 @@ watch(
             ></XSender
           >
           <div class="chatbot-composer-hint">
+            <p v-if="waiting" role="status">
+              正在等待你的回应，请在上方卡片中选择或填写。
+            </p>
             <slot name="actions" /><slot name="hint"
               >附件仅用于当前会话，不会加入知识库。</slot
             >

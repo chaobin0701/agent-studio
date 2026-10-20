@@ -84,6 +84,20 @@ export class SharedExecutionBudget {
       maxTotalTokens?: number;
     },
   ) {}
+  /** Trusted persisted continuation only; reservations must settle before waiting. */
+  restore(counters: typeof this.counters) {
+    for (const value of Object.values(counters))
+      if (!Number.isSafeInteger(value) || value < 0)
+        throw new TypeError("Invalid execution budget continuation");
+    if (
+      counters.reservedTokens !== 0 ||
+      counters.modelCalls > this.limits.maxModelCalls ||
+      counters.toolCalls > this.limits.maxToolCalls ||
+      (this.limits.maxTotalTokens !== undefined &&
+        counters.totalTokens > this.limits.maxTotalTokens)
+    ) throw new TypeError("Execution budget continuation exceeds limits");
+    Object.assign(this.counters, counters);
+  }
   takeTool(): boolean {
     if (this.counters.toolCalls >= this.limits.maxToolCalls) return false;
     this.counters.toolCalls++;

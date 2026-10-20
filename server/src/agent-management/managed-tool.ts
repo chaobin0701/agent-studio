@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { toolArgumentsHash } from "../ai/tools/tool-context";
 import type { AgentTool } from "../ai/tools/agent-tool";
 import type { ToolSpec, ResourceVersion } from "./resource.types";
 import {
@@ -21,6 +22,7 @@ export function makeManagedTool(
       source:
         spec.type === "rest" ? "http" : spec.type === "mcp" ? "mcp" : "builtin",
       toolVersionId: v.id,
+      requiresApproval: spec.requiresApproval,
     },
     runtimeLimits: { maxRetries: spec.maxRetries, timeoutMs: spec.timeoutMs },
     name: v.key,
@@ -41,7 +43,11 @@ export function makeManagedTool(
         : spec.readOnly || !!spec.idempotencyHeader,
     },
     async execute(input: any, context) {
-      if (spec.requiresApproval && !context.approvedTools?.includes(v.key))
+      const approvedCall = context.toolApproval &&
+        context.toolApproval.toolCallId &&
+        context.toolApproval.toolVersionId === v.id &&
+        context.toolApproval.argumentsHash === toolArgumentsHash(input);
+      if (spec.requiresApproval && !approvedCall && !context.approvedTools?.includes(v.key))
         return {
           success: false,
           content: "该工具需要人工批准",
