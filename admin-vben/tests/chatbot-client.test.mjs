@@ -33,7 +33,8 @@ function fixture() {
     uploads = 0,
     interactions = [],
     eventListener,
-    responseFailure;
+    responseFailure,
+    displayQuota = null;
   const pendingInteraction = () =>
     interactions.find((i) => i.status === "pending");
   const api = {
@@ -52,6 +53,7 @@ function fixture() {
           canDelete: true,
           canRename: true,
         };
+      if (path === "/chat-status") return { quota: displayQuota };
       if (method === "GET" && path.startsWith("/sessions?q="))
         return [...sessions];
       if (method === "POST" && path === "/sessions") {
@@ -191,6 +193,7 @@ function fixture() {
     finish: () => {
       complete = true;
     },
+    setQuota: (value) => { displayQuota = value; },
     uploads: () => uploads,
     waitFor: (kind = "question") => {
       const interaction = {
@@ -224,6 +227,28 @@ function fixture() {
     },
   };
 }
+test("composer quota is loaded on entry, refreshed on demand, and hidden when unavailable", async () => {
+  const f = fixture(),
+    c = createChatbotClient(f.api, "quota", f.storage),
+    value = {
+      scope: "application-shared",
+      resetAt: "2026-10-21T00:00:00.000Z",
+      timezone: "Asia/Shanghai",
+      checkedAt: "2026-10-20T08:00:00.000Z",
+      requests: { limit: 10, used: 3, remaining: 7 },
+    };
+  try {
+    f.setQuota(value);
+    await c.initialize();
+    assert.deepEqual(c.state.quota, value);
+    f.setQuota(null);
+    await c.refreshQuota();
+    assert.equal(c.state.quota, null);
+    assert.ok(f.calls.some((call) => call.path === "/chat-status"));
+  } finally {
+    c.dispose();
+  }
+});
 
 test("formal chat creates one session, sends a strict payload and keeps explicit stop separate from view disposal", async () => {
   const f = fixture(),

@@ -1,6 +1,6 @@
 # Agent Studio
 
-**构建、发布并运行通用 Agent 的开源平台。** 在一个工作区管理模型、Prompt、Skill、知识库和工具，让同一套执行能力可以通过后台、聊天端或 API 接入不同应用。
+**构建、发布并运行通用 Agent 的开源平台。** 在一个工作区管理模型、Prompt、Skill、知识库和工具，让同一套执行能力可以通过后台聊天和 API 接入不同应用。
 
 [在线应用体验](https://hexu.7410000.xyz/) · [独立展示站 Demo Hub](https://github.com/chaobin0701/demo-hub) · [部署说明](deploy/showcase/README.md)
 
@@ -30,13 +30,13 @@ Agent Studio 负责资源版本、权限和执行；业务系统继续拥有自�
 
 | 层 | 技术 |
 | --- | --- |
-| 管理后台与聊天端 | Vue 3、Vben Admin、Element Plus、Vite |
+| 管理后台与共享聊天 UI | Vue 3、Vben Admin、Element Plus、Vite |
 | API 与 Agent 执行 | Node.js、TypeScript、NestJS、Deep Agents、LangChain、LangGraph |
 | 知识检索与持久化 | PostgreSQL 全文索引、pgvector、版本化索引 |
 | 异步文档任务 | pg-boss、独立 Worker |
 | 外部能力与传输 | HTTP Tool、MCP Streamable HTTP、SSE |
 
-仓库按管理后台、聊天端、服务端和共享 UI / 输出规范组织；详细模块位于 `admin-vben/`、`chat/`、`server/` 与 `packages/`。
+仓库按管理后台、服务端和共享 UI / 输出规范组织；详细模块位于 `admin-vben/`、`server/` 与 `packages/`。
 
 ## 本地启动
 
@@ -51,11 +51,11 @@ npm run admin:bootstrap         # 交互创建首个管理员
 npm run dev
 ```
 
-默认地址：管理后台 `http://localhost:8085`、聊天端 `http://localhost:8852`、API `http://localhost:3020`，PostgreSQL 本机端口 `5437`。首次登录后，先配置供应商连接与模型方案，再创建并发布 Prompt 和 Agent；需要对外聊天时，在后台创建接入应用，绑定已发布 Agent 并设置允许的 Origin。
+默认地址：管理后台 `http://localhost:8085`、API `http://localhost:3020`，PostgreSQL 本机端口 `5437`。首次登录后，先配置供应商连接与模型方案，再创建并发布 Prompt 和 Agent；需要对外聊天时，在后台创建接入应用，绑定已发布 Agent 并设置允许的 Origin。Agent 管理页的“试运行”进入独立任务页面；草稿试运行固定当前已保存修订。
 
-对外聊天地址为 `http://localhost:8852/?app=应用UUID`；生产路径为 `/chat/?app=应用UUID`。应用 ID 是公开标识，浏览器使用服务端签发的短期访客令牌，**不能放入平台 API Key**。测试和启动不会自动启用应用或扩大 Origin。
+外部聊天界面可通过接入应用调用平台 API；Demo Hub 是独立项目中的示例。应用 ID 是公开标识，浏览器使用服务端签发的短期访客令牌，**不能放入平台 API Key**。测试和启动不会自动启用应用或扩大 Origin。
 
-需要交互式提问时，在工具管理创建并测试、发布内置 `ask_user`，再绑定到单 Agent；需要审批时开启相应工具的“调用前需批准”，按现有版本流程发布。共享聊天端与 Demo Hub 均支持卡片、刷新恢复及历史查看。配置方式、API 与支持边界见[补充信息与工具审批](docs/human-interactions.md)。
+需要交互式提问时，在工具管理创建并测试、发布内置 `ask_user`，再绑定到单 Agent；需要审批时开启相应工具的“调用前需批准”，按现有版本流程发布。后台聊天与 Demo Hub 均支持卡片、刷新恢复及历史查看。配置方式、API 与支持边界见[补充信息与工具审批](docs/human-interactions.md)。
 
 ## 验证与部署
 

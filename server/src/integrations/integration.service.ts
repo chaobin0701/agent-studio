@@ -1101,6 +1101,53 @@ export class IntegrationService implements OnModuleInit {
     };
   }
 
+  /** Minimal composer projection. Unconfigured or unauthorized quotas are omitted. */
+  async displayQuota(identity: IntegrationIdentity) {
+    const app = await this.app(identity.app.id);
+    const appEnabled = app.enabled &&
+      (identity.kind === "api" ? app.apiEnabled : app.websiteEnabled);
+    const mayRead = identity.scopes.includes("usage:read") && app.scopes.includes("usage:read") &&
+      (identity.kind === "api" || Boolean(identity.ownerId));
+    if (!appEnabled || !mayRead) return { quota: null };
+
+    const requestLimit = applicationLimit(app, "dailyRequests");
+    const tokenLimit = applicationLimit(app, "dailyTokenLimit");
+    if (requestLimit === null && tokenLimit === null) return { quota: null };
+
+    this.checkInspectionRate(identity);
+    const daily = await this.tokens.daily(app.id);
+    const requests = requestLimit === null ? undefined : (
+      await this.db.query<{ used: number }>(
+        `SELECT count(*)::int AS used FROM integration_calls WHERE app_id=$1 AND created_at>=${DAY_START}`,
+        [app.id],
+      )
+    ).rows[0]?.used ?? 0;
+    return {
+      quota: {
+        scope: "application-shared" as const,
+        resetAt: daily.resetAt,
+        timezone: daily.timezone,
+        checkedAt: new Date().toISOString(),
+        ...(requestLimit !== null ? {
+          requests: {
+            limit: requestLimit,
+            used: requests,
+            remaining: Math.max(0, requestLimit - requests!),
+          },
+        } : {}),
+        ...(tokenLimit !== null ? {
+          tokens: {
+            limit: tokenLimit,
+            used: daily.totalTokens,
+            reserved: daily.reservedTokens,
+            remaining: Math.max(0, tokenLimit - daily.totalTokens - daily.reservedTokens),
+            unsettled: daily.reservedTokens > 0 || daily.unknownModelCalls > 0,
+          },
+        } : {}),
+      },
+    };
+  }
+
   // Explicitly published website budget, separate from private visitor usage and platform reports.
   // No keys, origins, other applications, user identities or execution contexts are returned.
   async publicWebsiteQuota(identity: IntegrationIdentity) {

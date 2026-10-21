@@ -5,17 +5,12 @@ import {
   ElButton,
   ElDialog,
   ElFormItem,
-  ElInput,
-  ElOption,
-  ElSelect,
   ElSegmented,
-  ElTable,
-  ElTableColumn,
-  ElCheckbox,
-  ElUpload,
+  ElDropdown,
+  ElDropdownMenu,
+  ElDropdownItem,
   ElMessage,
   ElMessageBox,
-  type UploadFile,
 } from "element-plus";
 import {
   normalizeSchema,
@@ -26,10 +21,12 @@ import {
 } from "@agent-studio/output-contract";
 import JsonEditor from "#/components/JsonEditor.vue";
 import HelpTip from "#/components/HelpTip.vue";
+import OutputFieldTree from "./OutputFieldTree.vue";
 import {
+  addSuggestedFollowUpsField,
   schemaFields,
   fieldsSchema,
-  OUTPUT_TEMPLATES,
+  EMPTY_OUTPUT_SCHEMA,
   type OutputField,
 } from "./output-editor";
 const props = defineProps<{ disabled?: boolean }>();
@@ -37,14 +34,19 @@ const output = defineModel<Contract | undefined>();
 const emit = defineEmits<{ valid: [value: boolean] }>();
 const mode = computed(() => output.value?.mode ?? "text");
 const source = ref(""),
-  view = ref("source"),
+  view = ref("fields"),
   rows = ref<OutputField[]>([]),
   rowError = ref(""),
-  template = ref("extract"),
   sampleOpen = ref(false),
   sampleText = ref(""),
   sampleResult = ref("");
+const lastSchema = ref(normalizeSchema(EMPTY_OUTPUT_SCHEMA));
+const importInput = ref<HTMLInputElement>();
 const parsed = computed(() => parseJson(source.value));
+const followUpsConfigured = computed(() => {
+  const schema = parsed.value.value as { properties?: Record<string, unknown> } | undefined;
+  return Boolean(schema?.properties && Object.hasOwn(schema.properties, "suggestedFollowUps"));
+});
 const validation = computed(() => {
   if (parsed.value.error) return parsed.value.error;
   try {
@@ -73,9 +75,12 @@ watch(
   () => output.value,
   (v) => {
     if (lastEmitted !== undefined && JSON.stringify(v) === lastEmitted) return;
-    if (v?.mode === "json") source.value = JSON.stringify(v.schema, null, 2);
+    if (v?.mode === "json") {
+      source.value = JSON.stringify(v.schema, null, 2);
+      lastSchema.value = normalizeSchema(v.schema);
+    }
     else if (!source.value)
-      source.value = JSON.stringify(OUTPUT_TEMPLATES[0]!.schema, null, 2);
+      source.value = JSON.stringify(EMPTY_OUTPUT_SCHEMA, null, 2);
     rowError.value = "";
     if (view.value === "fields")
       rows.value =
@@ -85,6 +90,7 @@ watch(
 );
 function applySchema(schema: unknown) {
   const normalized = normalizeSchema(schema);
+  lastSchema.value = normalized;
   commit({ mode: "json", schema: normalized });
 }
 watch(source, () => {
@@ -99,7 +105,7 @@ function setMode(value: string | number | boolean) {
     return;
   }
   if (!validation.value) applySchema(parsed.value.value);
-  else commit({ mode: "json", schema: OUTPUT_TEMPLATES[0]!.schema });
+  else commit({ mode: "json", schema: lastSchema.value });
 }
 function schemaMessage(value: unknown) {
   try {
@@ -115,6 +121,7 @@ function setView(value: string | number | boolean) {
     return;
   }
   if (value === "fields") {
+    if (validation.value) return;
     const fields = schemaFields(parsed.value.value);
     if (!fields) return;
     rows.value = fields;
@@ -130,6 +137,16 @@ function updateRows() {
     applySchema(next);
   } catch (e) {
     rowError.value = e instanceof Error ? e.message : "字段或枚举格式无效";
+  }
+}
+function addFollowUpsField() {
+  if (props.disabled || !fieldsAvailable.value || followUpsConfigured.value) return;
+  try {
+    rows.value = schemaFields(parsed.value.value) ?? [];
+    addSuggestedFollowUpsField(rows.value);
+    updateRows();
+  } catch (e) {
+    rowError.value = e instanceof Error ? e.message : "无法添加追问字段";
   }
 }
 async function replace(schema: unknown, title: string) {
@@ -148,24 +165,26 @@ async function replace(schema: unknown, title: string) {
   applySchema(normalized);
   view.value = "source";
 }
-async function importSchema(file: UploadFile) {
+async function importSchema(event: Event) {
+  const input = event.target as HTMLInputElement;
+  const file = input.files?.[0];
   try {
     if (
-      !file.raw ||
+      !file ||
       !file.name.endsWith(".schema.json") ||
-      file.raw.size > 48_000
+      file.size > 48_000
     )
       throw new Error(
         "请选择不超过 48 KB 的 .schema.json 文件（规范最多 12000 字符）",
       );
-    const result = parseJson(await file.raw.text());
+    const result = parseJson(await file.text());
     if (result.error) throw new Error(result.error);
     await replace(normalizeSchema(result.value), "导入输出规范");
   } catch (e) {
     ElMessage.error(
       e instanceof Error ? e.message : "导入失败，未替换当前规范",
     );
-  }
+  } finally { input.value = ""; }
 }
 function exportSchema() {
   const blob = new Blob(
@@ -197,14 +216,15 @@ function sample() {
     sampleResult.value = "此规范未能生成合规示例，请手动填写 JSON 进行校验。";
 }
 function checkSample() {
+  if (!valid.value) { sampleResult.value = "Schema 规则尚未通过，请先修正规范。"; return; }
   const data = parseJson(sampleText.value);
   if (data.error) {
-    sampleResult.value = data.error;
+    sampleResult.value = "示例 JSON 语法错误：" + data.error;
     return;
   }
   const issues = validateStructured(parsed.value.value, data.value);
   sampleResult.value = issues.length
-    ? issues.map((i) => `${i.path}: ${i.message}`).join("；")
+    ? "示例数据不符合规则：" + issues.map((i) => `${i.path}: ${i.message}`).join("；")
     : "校验通过";
 }
 </script>
@@ -230,33 +250,6 @@ function checkSample() {
       ></ElAlert
     >
     <template v-if="mode === 'json'">
-      <div class="flex flex-wrap items-center gap-2">
-        <ElSelect
-          v-model="template"
-          class="!w-40"
-          :disabled="disabled"
-          aria-label="输出模板"
-          ><ElOption
-            v-for="item in OUTPUT_TEMPLATES"
-            :key="item.key"
-            :label="item.name"
-            :value="item.key"
-        /></ElSelect>
-        <ElButton
-          :disabled="disabled"
-          @click="
-            replace(
-              OUTPUT_TEMPLATES.find((t) => t.key === template)!.schema,
-              '使用模板',
-            )
-          "
-          >使用模板</ElButton
-        >
-        <HelpTip
-          long
-          text="规范只定义 structured 字段，不改变回答、引用、产物与用量。字段描述会传给模型。仅支持有界 JSON Schema 子集，不支持引用、正则和组合关键字。"
-        />
-      </div>
       <div class="flex flex-wrap items-center justify-between gap-2">
         <ElSegmented
           :model-value="view"
@@ -267,23 +260,31 @@ function checkSample() {
           @change="setView"
         />
         <div class="flex flex-wrap gap-2">
-          <ElButton size="small" @click="copy">复制</ElButton>
-          <ElUpload
-            v-if="!disabled"
-            :auto-upload="false"
-            :show-file-list="false"
-            accept=".schema.json"
-            :on-change="importSchema"
-            ><ElButton size="small">导入</ElButton></ElUpload
-          >
-          <ElButton size="small" :disabled="!valid" @click="exportSchema"
-            >导出</ElButton
-          >
-          <ElButton size="small" :disabled="!valid" @click="sample"
-            >示例与校验</ElButton
-          >
+          <ElButton
+            v-if="!disabled && !followUpsConfigured"
+            link
+            type="primary"
+            :disabled="!fieldsAvailable"
+            @click="addFollowUpsField"
+          >添加“你可能还想问”字段</ElButton>
+          <ElButton type="primary" :disabled="!valid" @click="sample">示例与校验</ElButton>
+          <ElDropdown trigger="click">
+            <ElButton>更多</ElButton>
+            <template #dropdown><ElDropdownMenu>
+              <ElDropdownItem @click="copy">复制源码</ElDropdownItem>
+              <ElDropdownItem :disabled="disabled" @click="importInput?.click()">导入 Schema</ElDropdownItem>
+              <ElDropdownItem :disabled="!valid" @click="exportSchema">导出 Schema</ElDropdownItem>
+            </ElDropdownMenu></template>
+          </ElDropdown>
+          <HelpTip long text="规范定义 structured 数据字段；回答正文、引用和用量不受影响。可选的 suggestedFollowUps 字符串数组会显示为回复后的追问建议。只开放当前后端支持的 JSON Schema 子集。字段描述会传给模型。" />
+          <input ref="importInput" class="hidden" type="file" accept=".schema.json" :disabled="disabled" @change="importSchema" />
         </div>
       </div>
+      <div class="flex flex-wrap gap-x-5 gap-y-1 text-sm" role="status">
+        <span>JSON 语法：{{ parsed.error ? '存在错误' : '正确' }}</span>
+        <span>Schema 规则：{{ rowError || validation ? '存在错误' : '有效' }}</span>
+      </div>
+      <ElAlert v-if="!valid" type="error" :closable="false" title="存在错误，尚未保存" :description="rowError || validation" />
       <div v-show="view === 'source'">
         <JsonEditor
           v-model="source"
@@ -294,99 +295,7 @@ function checkSample() {
           :validate-value="schemaMessage"
         />
       </div>
-      <template v-if="view === 'fields'">
-        <ElTable :data="rows" size="small">
-          <ElTableColumn label="名称" min-width="110"
-            ><template #default="{ row }"
-              ><ElInput
-                v-model="row.name"
-                :disabled="disabled"
-                aria-label="字段名称"
-                @input="updateRows" /></template
-          ></ElTableColumn>
-          <ElTableColumn label="类型" width="118"
-            ><template #default="{ row }"
-              ><ElSelect
-                v-model="row.type"
-                :disabled="disabled"
-                @change="updateRows"
-                ><ElOption
-                  v-for="t in [
-                    'string',
-                    'number',
-                    'integer',
-                    'boolean',
-                    'null',
-                  ]"
-                  :key="t"
-                  :label="t"
-                  :value="t" /></ElSelect></template
-          ></ElTableColumn>
-          <ElTableColumn label="描述" min-width="135"
-            ><template #default="{ row }"
-              ><ElInput
-                v-model="row.description"
-                :disabled="disabled"
-                aria-label="字段描述"
-                @input="updateRows" /></template
-          ></ElTableColumn>
-          <ElTableColumn label="必填" width="62"
-            ><template #default="{ row }"
-              ><ElCheckbox
-                v-model="row.required"
-                :disabled="disabled"
-                aria-label="必填"
-                @change="updateRows" /></template
-          ></ElTableColumn>
-          <ElTableColumn label="枚举（JSON 数组）" min-width="150"
-            ><template #default="{ row }"
-              ><ElInput
-                v-model="row.enumText"
-                :disabled="disabled"
-                placeholder='["a", "b"]'
-                @input="updateRows" /></template
-          ></ElTableColumn>
-          <ElTableColumn v-if="!disabled" width="65"
-            ><template #default="{ $index }"
-              ><ElButton
-                link
-                type="danger"
-                @click="
-                  rows.splice($index, 1);
-                  updateRows();
-                "
-                >移除</ElButton
-              ></template
-            ></ElTableColumn
-          >
-        </ElTable>
-        <ElButton
-          v-if="!disabled"
-          @click="
-            rows.push({
-              name: 'field_' + (rows.length + 1),
-              type: 'string',
-              description: '',
-              required: true,
-              enumText: '',
-            });
-            updateRows();
-          "
-          >添加字段</ElButton
-        >
-        <ElAlert
-          v-if="rowError"
-          :title="rowError"
-          type="error"
-          :closable="false"
-        />
-      </template>
-      <p
-        v-if="!fieldsAvailable && view === 'source'"
-        class="text-xs text-muted-foreground"
-      >
-        嵌套对象、数组、可空类型和额外约束请在源码编辑，切换不会简化或丢失规范。
-      </p>
+      <OutputFieldTree v-if="view === 'fields'" :rows="rows" :disabled="disabled" @change="updateRows" />
     </template>
     <p v-else class="text-sm text-muted-foreground">
       使用自然语言回答，不强制 structured 字段。发布后对新请求生效。
@@ -404,7 +313,7 @@ function checkSample() {
     >
       <div class="space-y-4">
         <p class="text-sm text-muted-foreground">
-          本地生成示例及校验，不调用模型。修改示例不会改变输出规范。
+          JSON 语法正确 → Schema 规则有效 → 示例数据符合规则。校验在本地完成，不调用模型。
         </p>
         <JsonEditor
           v-model="sampleText"

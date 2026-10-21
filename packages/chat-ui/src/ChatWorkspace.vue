@@ -18,6 +18,7 @@ import type {
   ChatSession,
   ChatTurn,
   ChatInteractionResponse,
+  ChatQuota,
 } from "./types";
 import "./styles.css";
 const props = withDefaults(
@@ -25,6 +26,8 @@ const props = withDefaults(
     sessions: ChatSession[];
     activeId?: string | null;
     messages: ChatTurn[];
+    contextUsage?: ChatTurn["contextUsage"];
+    quota?: ChatQuota | null;
     draft: string;
     attachments?: ChatAttachment[];
     busy?: boolean;
@@ -85,6 +88,12 @@ const list = computed(() =>
     placement: m.role === "user" ? ("end" as const) : ("start" as const),
   })),
 );
+const latestAssistantId = computed(() => {
+  const latest = props.messages.at(-1);
+  return latest?.role === "assistant" && latest.status === "completed"
+    ? latest.id
+    : null;
+});
 const fileItems = computed(() =>
   props.attachments.map((a) => ({
     uid: a.id,
@@ -128,6 +137,23 @@ const canSend = computed(
 function changed() {
   if (syncing) return;
   emit("update:draft", sender.value?.getModelValue().text ?? "");
+}
+function formatTokens(value: number) {
+  return new Intl.NumberFormat("zh-CN").format(value);
+}
+function resetTime(quota: ChatQuota) {
+  return new Intl.DateTimeFormat("zh-CN", {
+    timeZone: quota.timezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(quota.resetAt));
+}
+function addFollowUp(question: string) {
+  const base = props.draft.trimEnd();
+  emit("update:draft", base ? `${base}\n${question}` : question);
 }
 async function send() {
   changed();
@@ -257,14 +283,36 @@ watch(
               :interaction-disabled="!activeRunId || item.runId !== activeRunId"
               :interaction-responding-id="interactionRespondingId"
               :interaction-errors="interactionErrors"
+              :show-follow-ups="item.id === latestAssistantId"
               @respond="$emit('respond', $event)"
               @cancel-interaction="$emit('cancelInteraction')"
               @download="$emit('download', $event)"
+              @follow-up="addFollowUp"
               @inspect="$emit('inspect', $event)" /></template
         ></BubbleList>
       </div>
       <footer ref="composer" class="chatbot-composer">
         <div class="chatbot-composer-column">
+          <div v-if="contextUsage || quota?.requests || quota?.tokens" class="chatbot-status-line" aria-label="对话状态">
+            <details v-if="contextUsage" class="chatbot-status-item">
+              <summary>上下文{{ contextUsage.measurementSource === 'provider' ? '' : '约' }} {{ contextUsage.usagePercent }}%</summary>
+              <div class="chatbot-status-detail">
+                <p>{{ contextUsage.measurementSource === 'provider' ? '本次调用测量' : '本次调用估算' }} · {{ contextUsage.model }}</p>
+                <p>模型窗口 {{ formatTokens(contextUsage.contextWindowTokens) }} Token</p>
+                <p>有效输入预算 {{ formatTokens(contextUsage.inputBudgetTokens) }} Token</p>
+                <p>本次输入 {{ formatTokens(contextUsage.estimatedInputTokens) }} Token · 可用 {{ formatTokens(contextUsage.remainingInputTokens) }} Token</p>
+              </div>
+            </details>
+            <details v-if="quota?.requests || quota?.tokens" class="chatbot-status-item">
+              <summary>{{ quota.requests ? `今日剩余 ${formatTokens(quota.requests.remaining)} 次` : `今日剩余 ${formatTokens(quota.tokens!.remaining)} Token` }}</summary>
+              <div class="chatbot-status-detail">
+                <p>应用共享额度 · 重置时间 {{ resetTime(quota) }}（{{ quota.timezone }}）</p>
+                <p v-if="quota.requests">请求 {{ formatTokens(quota.requests.used) }} / {{ formatTokens(quota.requests.limit) }} 次</p>
+                <p v-if="quota.tokens">Token {{ formatTokens(quota.tokens.used) }} / {{ formatTokens(quota.tokens.limit) }} · 预留 {{ formatTokens(quota.tokens.reserved) }}</p>
+                <p v-if="quota.tokens?.unsettled">部分调用尚未结算，预留消耗已计入剩余量。</p>
+              </div>
+            </details>
+          </div>
           <Attachments
             :items="fileItems"
             :hide-upload="true"

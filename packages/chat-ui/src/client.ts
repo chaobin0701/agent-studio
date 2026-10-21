@@ -5,6 +5,7 @@ import type {
   ChatTurn,
   ChatInteraction,
   ChatInteractionResponse,
+  ChatQuota,
 } from "./types";
 
 export interface ChatbotApi {
@@ -87,6 +88,7 @@ export function createChatbotClient(
     canDelete: false,
     canRename: true,
     creating: false,
+    quota: null as ChatQuota | null,
   });
   let disposed = false,
     initial: Promise<void> | undefined,
@@ -97,6 +99,27 @@ export function createChatbotClient(
   const previews = new Map<string, string>();
   const previewing = new Map<string, Promise<void>>();
   let capabilities: Promise<void> | undefined;
+  let quotaRefresh: Promise<void> | undefined;
+  async function refreshQuota() {
+    if (quotaRefresh) return quotaRefresh;
+    quotaRefresh = (async () => {
+      try {
+        const result = await api.request<{ quota?: ChatQuota | null }>(
+          "GET",
+          "/chat-status",
+        );
+        if (!disposed) state.quota = result.quota ?? null;
+      } catch {
+        // Permission and configuration failures intentionally hide this optional status.
+        if (!disposed) state.quota = null;
+      }
+    })();
+    try {
+      await quotaRefresh;
+    } finally {
+      quotaRefresh = undefined;
+    }
+  }
   async function refreshCapabilities() {
     if (capabilities) return capabilities;
     capabilities = (async () => {
@@ -305,7 +328,7 @@ export function createChatbotClient(
         state.loading = true;
         state.error = "";
         try {
-          await refreshCapabilities();
+          await Promise.all([refreshCapabilities(), refreshQuota()]);
           if (disposed) return;
           await search();
           if (disposed) return;
@@ -355,6 +378,7 @@ export function createChatbotClient(
   async function refresh() {
     try {
       await refreshCapabilities();
+      await refreshQuota();
       if (disposed) return;
       state.error = "";
       await search();
@@ -471,7 +495,7 @@ export function createChatbotClient(
           buffer.runStatus = null;
         }
         await load(id).catch(() => {});
-        await search().catch(() => {});
+        await Promise.all([search().catch(() => {}), refreshQuota()]);
       }
     })()
       .catch((error) => {
@@ -803,6 +827,7 @@ export function createChatbotClient(
     search,
     refresh,
     refreshCapabilities,
+    refreshQuota,
     draft,
     send,
     respond,

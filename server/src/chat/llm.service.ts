@@ -26,6 +26,8 @@ import {
   annotateExecution,
 } from "../observability/execution-tracer";
 
+import { measureModelContext, type ModelContextUsage } from "./context-governor";
+
 export const LLM_MAX_RETRIES = 3;
 export const LLM_MAX_ATTEMPTS = LLM_MAX_RETRIES + 1;
 export const LLM_RETRY_DELAYS_MS = [1000, 2000, 4000] as const;
@@ -68,6 +70,7 @@ export type RetryStatusEvent = {
 };
 
 export type ModelResult = {
+  context?: ModelContextUsage;
   content: string;
   toolCalls: LlmToolCall[];
   model: string;
@@ -453,6 +456,7 @@ export class LlmService {
             });
           }
           return {
+            context: measureModelContext(request, provider.contextWindowTokens ?? this.contextWindowTokens, response.usage.inputTokens),
             content: response.content,
             toolCalls,
             model: response.model,
@@ -819,6 +823,7 @@ export class LlmService {
           });
         }
         return {
+          context: measureModelContext(request, provider.contextWindowTokens ?? this.contextWindowTokens, usage.inputTokens),
           content,
           toolCalls,
           model: request.model,

@@ -21,7 +21,7 @@ function fixture(kind='tool',manage=true){
   patch:async(url,body)=>{calls.push({url,body});return {revision:body.revision+1};},
  };
  const context={ref,computed,watch(){},defineAsyncComponent(){},onBeforeUnmount(){},createDraftQueue,httpToolConfig,toolTestExample,
-  useRoute:()=>route,useRouter:()=>({}),useAccessStore:()=>({accessCodes:manage?['agent_config.manage','agent_tools.execute']:[]}),
+  useRoute:()=>route,useRouter:()=>({}),useWorkspaceStore:()=>({id:1,generation:0}),useAccessStore:()=>({accessCodes:manage?['agent_config.manage','agent_tools.execute']:[]}),
   useUnsavedChanges:(_dirty,flush)=>async()=>flush?flush():true,api,ElMessage:{success(){},warning(){},info(){}},ElMessageBox:{confirm:async()=>{}},setTimeout,clearTimeout};
  runInNewContext(`${script('resources/index.vue')}\nglobalThis.page={load,detail,selected,config,original,dirty,preparePreview,draftQueue,saveState,toolContentValid,openToolTest,testOpen,publish};`,context);
  return {...context,page:context.page,calls,resource};

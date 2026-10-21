@@ -125,9 +125,9 @@ npm test
 # 指向可创建临时 schema 的测试数据库（不能把密码写入提交文件）
 TEST_DATABASE_URL=<database-url> node --test test/integration-access.test.mjs
 
-cd ../chat
-npm test
-npm run build
+cd ../admin-vben
+pnpm test
+pnpm build
 ```
 
 隔离数据库测试验证迁移及回滚、权限、跨应用 / 用户、首条消息幂等、SSE、限额、密钥生命周期和审计。`server/scripts/check-integration-access.mjs` 使用内存管理员令牌做真实浏览器验证，创建唯一临时应用，测试真实模型 SSE、复制提示、统计、轮换、撤销和响应式布局，最后只清理该应用的测试资源。不保存完整接入密钥到截图、磁盘或日志。

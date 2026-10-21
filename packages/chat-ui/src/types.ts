@@ -66,4 +66,25 @@ export interface ChatTurn {
     data?: Record<string, unknown>;
   }>;
   references?: Array<{ kind: string; id: string; title?: string }>;
+  contextUsage?: {
+    model: string;
+    contextWindowTokens: number;
+    inputBudgetTokens: number;
+    estimatedInputTokens: number;
+    remainingInputTokens: number;
+    usagePercent: number;
+    measurementSource: "heuristic" | "provider";
+    maxOutputTokens: number;
+    safetyBufferTokens: number;
+    measuredAt: string;
+    includesDraft: false;
+  };
+}
+export interface ChatQuota {
+  scope: "application-shared";
+  resetAt: string;
+  timezone: string;
+  checkedAt: string;
+  requests?: { limit: number; used: number; remaining: number };
+  tokens?: { limit: number; used: number; reserved: number; remaining: number; unsettled: boolean };
 }

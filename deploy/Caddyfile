@@ -4,11 +4,9 @@
       flush_interval -1
     }
   }
-  redir /chat /chat/
-  handle_path /chat/* {
-    root * /srv/chat
-    try_files {path} /index.html
-    file_server
+  @removedChat path /chat /chat/*
+  handle @removedChat {
+    respond "Not Found" 404
   }
   handle {
     root * /srv/admin

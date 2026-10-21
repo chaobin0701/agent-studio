@@ -53,6 +53,7 @@ export type PlatformAgentInput = {
 };
 
 export type PlatformAgentCallbacks = {
+  onContextUsage?: (context: import("../../chat/context-governor").ModelContextUsage) => void;
   /** Provisional public answer from the current model stream. */
   onAnswerDelta?: (text: string) => void;
   onAnswerReset?: (text: string) => void;

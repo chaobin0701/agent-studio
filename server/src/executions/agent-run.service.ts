@@ -312,6 +312,7 @@ export class AgentRunService {
             const { usage: _graphUsage, ...output } = result.output;
             const response: PublicRunResult = {
               ...output,
+              ...(result.contextSnapshot.contextUsage ? { contextUsage: result.contextSnapshot.contextUsage as import("../chat/context-governor").ModelContextUsage } : {}),
               runId,
               traceId,
               agentId: composition.agentId,
@@ -525,6 +526,7 @@ export class AgentRunService {
       artifacts,
       references,
       usage,
+      contextUsage,
     } = value;
     return {
       runId,
@@ -537,6 +539,7 @@ export class AgentRunService {
       references,
       ...(structured !== undefined ? { structured } : {}),
       ...(usage ? { usage } : {}),
+      ...(contextUsage ? { contextUsage } : {}),
     };
   }
 

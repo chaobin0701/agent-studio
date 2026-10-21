@@ -9,6 +9,7 @@ import {
 import { useRoute, useRouter } from "vue-router";
 import { Page } from "@vben/common-ui";
 import { useAccessStore } from "@vben/stores";
+import { useWorkspaceStore } from "#/store/workspace";
 import {
   type FormInstance,
   ElTable,
@@ -52,6 +53,7 @@ import JsonEditor from "#/components/JsonEditor.vue";
 import { createSkillDocument, skillCreateKey } from "./skill/create-document";
 import { skillResourceLimits, type SkillResource } from "./skill/resources";
 import { httpToolConfig, toolTestExample } from "../tools/create-config";
+import { playgroundRoute } from "../playground/target";
 const SkillDetail = defineAsyncComponent(() => import("./skill/detail.vue"));
 const skillDetail = ref<{ prepareLeave: () => Promise<boolean> }>();
 const workflowTestOpen = ref(false);
@@ -75,7 +77,8 @@ const visibleImportDiagnostics = computed(() =>
 );
 const route = useRoute(),
   router = useRouter(),
-  access = useAccessStore();
+  access = useAccessStore(),
+  workspace = useWorkspaceStore();
 const kind = computed(() => String(route.meta.resourceKind));
 const label = computed(
   () => ({ agent: "Agent", skill: "Skill", tool: "Tool" })[kind.value],
@@ -132,6 +135,7 @@ const saveState = ref<DraftSaveState>({
 const toolContentValid = ref(true);
 const toolTestValid = ref(true);
 const toolTestVersion = ref<number>();
+const previewing = ref(false);
 const questionToolTest = computed(
   () =>
     kind.value === "tool" &&
@@ -325,6 +329,42 @@ async function preparePreview() {
   }
   if (!(await draftQueue.flush()) || dirty.value) return false;
   return true;
+}
+async function openPreview(resource?: any) {
+  if (previewing.value || busy.value) return;
+  const path = route.fullPath;
+  const workspaceId = workspace.id;
+  const workspaceGeneration = workspace.generation;
+  const resourceId = resource?.id ?? detail.value?.id;
+  const versionId = resource ? undefined : selected.value;
+  const stillHere = () =>
+    route.fullPath === path &&
+    workspace.id === workspaceId &&
+    workspace.generation === workspaceGeneration &&
+    (resource || (detail.value?.id === resourceId && selected.value === versionId));
+  previewing.value = true;
+  try {
+    if (resource) {
+      const latest = await api.get(`/agent-resources/${resource.id}`);
+      if (!stillHere()) return;
+      const draft = latest.versions.find((version: any) => version.status === "draft");
+      const target = playgroundRoute(latest, draft?.id ?? latest.currentVersionId);
+      if (target) await router.push(target);
+      else ElMessage.warning("当前 Agent 没有可试运行的版本");
+      return;
+    }
+    const version = active.value;
+    if (!detail.value || !version) return;
+    if (version.status === "draft" && !(await preparePreview())) return;
+    if (!stillHere()) return;
+    const target = playgroundRoute(detail.value, selected.value);
+    if (target) await router.push(target);
+    else ElMessage.warning("当前版本不可试运行，请选择草稿或生效版本");
+  } catch {
+    ElMessage.error("无法打开试运行，请重试");
+  } finally {
+    previewing.value = false;
+  }
 }
 const createBaseline = ref(""),
   copyOpen = ref(false),
@@ -1010,12 +1050,8 @@ watch(
               "
               link
               type="primary"
-              @click="
-                router.push({
-                  path: `/agents/${row.id}`,
-                  query: { tab: 'preview' },
-                })
-              "
+              :disabled="previewing || busy"
+              @click="openPreview(row)"
               >试运行</ElButton
             ><ResourceLifecycle
               :resource="row"
@@ -1061,7 +1097,8 @@ watch(
         "
         :result="result"
         :save-state="saveState"
-        :prepare="preparePreview"
+        :previewing="previewing"
+        @preview="openPreview()"
         @version="version"
         @edit="editAgent"
         @save="save"

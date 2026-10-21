@@ -19,6 +19,14 @@ const props = defineProps<{
 }>();
 defineEmits<{ inspect: [traceId: string]; configureModel: [planId: number] }>();
 const buffer = computed(() => props.client.current());
+const contextUsage = computed(() => {
+  const latestAssistant = [...buffer.value.messages]
+    .reverse()
+    .find((message) => message.role === "assistant");
+  return latestAssistant?.status === "completed"
+    ? latestAssistant.contextUsage
+    : undefined;
+});
 const agent = computed(() =>
   props.client.state.agents.find(
     (a) => a.id === props.client.state.selectedAgentId,
@@ -70,16 +78,20 @@ async function refresh() {
   await props.client.refresh();
 }
 function updateCapabilities() {
-  if (document.visibilityState === "visible")
+  if (document.visibilityState === "visible") {
     void props.client.refreshCapabilities().catch(() => {});
+    void props.client.refreshQuota();
+  }
 }
 onMounted(() => {
   void props.client.initialize();
   window.addEventListener("focus", updateCapabilities);
+  document.addEventListener("visibilitychange", updateCapabilities);
 });
 onBeforeUnmount(() => {
   clearTimeout(searchTimer);
   window.removeEventListener("focus", updateCapabilities);
+  document.removeEventListener("visibilitychange", updateCapabilities);
 }); // The application owns the client/stream lifetime.
 </script>
 <template>
@@ -89,6 +101,8 @@ onBeforeUnmount(() => {
     :messages="buffer.messages"
     :draft="buffer.draft"
     :attachments="buffer.attachments"
+    :context-usage="contextUsage"
+    :quota="client.state.quota"
     :images-enabled="!!agent?.supportsImages"
     :image-input-reason="agent?.imageInputReason"
     :busy="!!buffer.runId"

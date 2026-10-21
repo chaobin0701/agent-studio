@@ -36,11 +36,6 @@ for (const [dir, args, extra] of [
     ["pnpm", "dev", "--port", env.ADMIN_PORT || "8085", "--host", "127.0.0.1"],
     { API_PROXY_TARGET: `http://127.0.0.1:${env.PORT || 3020}` },
   ],
-  [
-    "chat",
-    ["npm", "run", "dev", "--", "--port", env.CHAT_PORT || "8852"],
-    { API_PROXY_TARGET: `http://127.0.0.1:${env.PORT || 3020}` },
-  ],
 ]) {
   const [command, ...argv] = args;
   const child = spawn(command, argv, {

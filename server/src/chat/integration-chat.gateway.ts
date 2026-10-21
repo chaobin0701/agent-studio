@@ -134,6 +134,7 @@ export class IntegrationChatGateway {
         refused: answer.refused,
         citations: answer.citations,
         progressEvents: answer.progressEvents,
+        ...(answer.contextUsage ? { contextUsage: answer.contextUsage } : {}),
         ...(answer.artifacts?.length ? { artifacts: answer.artifacts } : {}),
         ...(answer.references?.length ? { references: answer.references } : {}),
         ...(answer.structured !== undefined
@@ -149,6 +150,7 @@ export class IntegrationChatGateway {
       return {
         ...(completed ?? result),
         progressEvents: answer.progressEvents,
+        ...(answer.contextUsage ? { contextUsage: answer.contextUsage } : {}),
         toolSteps: answer.toolSteps,
       };
     } catch (error) {
@@ -226,6 +228,7 @@ export class IntegrationChatGateway {
       artifacts,
       references,
       structured,
+      contextUsage,
     } = result;
     return {
       conversationId,
@@ -241,6 +244,7 @@ export class IntegrationChatGateway {
       ...(artifacts?.length ? { artifacts } : {}),
       ...(references?.length ? { references } : {}),
       ...(structured !== undefined ? { structured } : {}),
+      ...(contextUsage ? { contextUsage } : {}),
     };
   }
 }
