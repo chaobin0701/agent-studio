@@ -13,6 +13,34 @@ import { AskUserTool } from "../dist/ai/tools/ask-user.tool.js";
 
 const question={kind:"question",question:"预算多少？",options:[{id:"b",label:"2000元"}],allowCustom:true};
 
+test("legacy conversation messages persist and replay structured output",async()=>{
+  const conversationId=randomUUID(),structured={suggestedFollowUps:["继续了解帐篷"]},queries=[];
+  const client={query:async(sql,args=[])=>{
+    queries.push({sql,args});
+    if(sql.includes("INSERT INTO conversation_messages")&&sql.includes("request_context"))return {rows:[{id:1}],rowCount:1};
+    if(sql.includes("INSERT INTO conversation_messages")&&sql.includes("structured"))return {rows:[{id:2}],rowCount:1};
+    if(sql.startsWith("UPDATE conversations"))return {rows:[],rowCount:1};
+    if(sql.includes("INSERT INTO chat_traces"))return {rows:[{}],rowCount:1};
+    throw Error(`Unexpected save SQL: ${sql}`);
+  }};
+  const database={transaction:async(work)=>work(client),query:async(sql,args=[])=>{
+    queries.push({sql,args});
+    if(sql.includes("SELECT content, refused, citations, structured"))return {rows:[{content:"帐篷回答",refused:false,citations:[],structured,toolSteps:[],progressEvents:[]}],rowCount:1};
+    throw Error(`Unexpected replay SQL: ${sql}`);
+  }};
+  const service=new ConversationService(database,{}, {model:"fixture"});
+  await service.saveResult(conversationId,"问题",{
+    result:{answer:"帐篷回答",refused:false,citations:[],structured},
+    contextSnapshot:{requestContext:{}},rawModelOutput:null,inputTokens:null,outputTokens:null,totalTokens:null,
+  },0,null);
+  const insert=queries.find(item=>item.sql.includes("INSERT INTO conversation_messages")&&item.sql.includes("structured"));
+  assert.ok(insert.sql.includes("structured"));
+  assert.equal(insert.args[4],JSON.stringify(structured));
+  assert.deepEqual(await service.resultForRun({assistantMessageId:2,conversationId}),{
+    answer:"帐篷回答",refused:false,citations:[],structured,toolSteps:[],progressEvents:[],
+  });
+});
+
 test("legacy Gateway preserves the accounting identity and private host bridge when native Chat waits",async()=>{
   const callId=randomUUID(),conversationId=randomUUID(),ownerId=randomUUID(),appId=randomUUID();
   const composition=nativeChat({respond:()=>({content:"fixture"})}).snapshot;
@@ -108,8 +136,9 @@ test("legacy message history retains resolved cards even when their Runs are old
   const card={...question,id:randomUUID(),runId:callId,status:"answered",revision:2,expiresAt:new Date().toISOString(),answer:{text:"2000元"}};
   const db={query:async(sql)=>{
     if(sql.includes("FROM conversations WHERE id = $1"))return {rows:[{id:conversationId}]};
-    if(sql.includes("FROM conversation_messages WHERE conversation_id"))return {rows:[{id:1,role:"user",content:"帮我选装备"},{id:2,role:"assistant",content:"结果"}]};
+    if(sql.includes("FROM conversation_messages WHERE conversation_id"))return {rows:[{id:1,role:"user",content:"帮我选装备"},{id:2,role:"assistant",content:"结果",structured:{suggestedFollowUps:["查看帐篷说明"]}}]};
     if(sql.includes("SELECT assistant_message_id::int"))return {rows:[{messageId:2,callId}]};
+    if(sql.includes("FROM conversation_runs r LEFT JOIN integration_calls"))return {rows:[{messageId:2,callId}]};
     if(sql.startsWith("UPDATE conversation_runs")||sql.startsWith("UPDATE conversations"))return {rows:[],rowCount:0};
     throw Error(`Unexpected history SQL: ${sql}`);
   }};
@@ -118,6 +147,7 @@ test("legacy message history retains resolved cards even when their Runs are old
   const messages=await service.messages(owner,conversationId);
   assert.deepEqual(messages[0].interactions,[]);
   assert.equal(messages[1].interactions[0].id,card.id);
+  assert.deepEqual(messages[1].structured,{suggestedFollowUps:["查看帐篷说明"]});
 });
 
 test("legacy Chat orchestrator and adapter carry native checkpoints through question/resume without replaying the first model",async()=>{

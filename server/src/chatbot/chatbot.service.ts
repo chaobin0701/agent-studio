@@ -135,6 +135,11 @@ export class ChatbotService implements OnApplicationShutdown {
       canRename: true,
     };
   }
+  async displayQuota(p: ChatbotPrincipal) {
+    await this.authorize(p);
+    if ("adminId" in p) return { quota: null };
+    return this.access.displayQuota(p.identity);
+  }
   async list(p: ChatbotPrincipal, query = "") {
     await this.authorize(p);
     if (query.length > 200) throw new BadRequestException("搜索词过长");
@@ -277,6 +282,7 @@ export class ChatbotService implements OnApplicationShutdown {
         references: response?.references ?? [],
         ...(response?.structured!==undefined?{structured:response.structured}:{}),
         usage: response?.usage,
+        ...(response?.contextUsage ? { contextUsage: response.contextUsage } : {}),
         createdAt: t.createdAt,
       },
     ];

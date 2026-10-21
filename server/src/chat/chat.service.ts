@@ -32,8 +32,9 @@ export type PublicProgressEvent = {
   ok?: boolean;
 };
 export type ProcessEvent = ({ type: 'tool' } & ToolStep) | CommentaryEvent | PublicProgressEvent;
-export type ChatAnswer = { answer: string; refused: boolean; citations: Citation[]; artifacts?:AgentArtifact[];references?:AgentReference[];structured?:JsonValue;toolSteps?: ToolStep[]; progressEvents?: ProcessEvent[]; context?: ContextEstimate };
+export type ChatAnswer = { contextUsage?: import("./context-governor").ModelContextUsage; answer: string; refused: boolean; citations: Citation[]; artifacts?:AgentArtifact[];references?:AgentReference[];structured?:JsonValue;toolSteps?: ToolStep[]; progressEvents?: ProcessEvent[]; context?: ContextEstimate };
 export type ChatStreamCallbacks = {
+  onContextUsage?: (context: import("./context-governor").ModelContextUsage) => void;
   /** Server-owned continuation bridge; never accepted from public JSON. */
   interactionHost?: import('../interactions/contracts').RuntimeInteractionHost;
   executionTraceId?: string;

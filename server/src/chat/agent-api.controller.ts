@@ -108,6 +108,11 @@ export class AgentApiController {
     return this.access.publicStatus(request.integration);
   }
 
+  @Get('chat-status')
+  chatStatus(@Req() request: IntegrationRequest) {
+    return this.access.displayQuota(request.integration);
+  }
+
   @Get('usage')
   usage(@Req() request: IntegrationRequest) {
     return this.access.publicUsage(request.integration);
@@ -122,7 +127,21 @@ export class AgentApiController {
   async history(@Req() request: IntegrationRequest, @Param('id', ParseUUIDPipe) id: string, @Query('userId') userId?: string) {
     this.access.assertScope(request.integration, 'conversations:read');
     const messages = await this.conversations.messages(await this.access.platformOwner(request.integration, userId), id);
-    return messages.map(({ id: messageId, role, content, refused, citations, artifacts, progressEvents, context, createdAt,interactions }) => ({ id: messageId, role, content, refused, citations, artifacts, progressEvents, context, createdAt,...(interactions?{interactions}:{}) }));
+    return messages.map(({ id: messageId, role, content, refused, citations, structured, artifacts, progressEvents, context, createdAt, contextUsage, interactions }) => ({
+      id: messageId,
+      role,
+      content,
+      refused,
+      citations,
+      ...(structured !== undefined && structured !== null ? { structured } : {}),
+      artifacts,
+      progressEvents,
+      context,
+      createdAt,
+      ...(role === "assistant" ? { status: "completed" as const } : {}),
+      ...(contextUsage ? { contextUsage } : {}),
+      ...(interactions ? { interactions } : {}),
+    }));
   }
   @Get('conversations/:id/runs')
   async runs(@Req() request: IntegrationRequest, @Param('id', ParseUUIDPipe) id: string, @Query('userId') userId?: string) {

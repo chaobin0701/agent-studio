@@ -14,12 +14,14 @@ const props = withDefaults(
     interactionDisabled?: boolean;
     interactionRespondingId?: string;
     interactionErrors?: Record<string, string>;
+    showFollowUps?: boolean;
   }>(),
   { showInspect: true, interactionDisabled: true },
 );
 defineEmits<{
   download: [id: string];
   inspect: [traceId: string];
+  followUp: [question: string];
   respond: [response: ChatInteractionResponse];
   cancelInteraction: [];
 }>();
@@ -32,6 +34,24 @@ const html = computed(() =>
 const pendingInteractions = computed(() => props.message.interactions?.filter(item => item.status === 'pending') ?? []);
 const resolvedInteractions = computed(() => props.message.interactions?.filter(item => item.status !== 'pending') ?? []);
 const activityKey = computed(() => resolvedInteractions.value.map(item => `${item.id}:${item.status}`).join('|'));
+const suggestedFollowUps = computed(() => {
+  if (!props.showFollowUps || props.message.role !== "assistant") return [];
+  const structured = props.message.structured;
+  if (!structured || typeof structured !== "object" || Array.isArray(structured)) return [];
+  const candidates = (structured as Record<string, unknown>).suggestedFollowUps;
+  if (!Array.isArray(candidates)) return [];
+  const result: string[] = [];
+  const seen = new Set<string>();
+  for (const candidate of candidates) {
+    if (typeof candidate !== "string") continue;
+    const question = candidate.trim();
+    if (!question || question.length > 120 || seen.has(question)) continue;
+    seen.add(question);
+    result.push(question);
+    if (result.length === 3) break;
+  }
+  return result;
+});
 async function copy() {
   try {
     await navigator.clipboard.writeText(props.message.content);
@@ -133,6 +153,17 @@ async function copy() {
           size="small"
           >{{ reference.title ?? reference.id }}</ElTag
         >
+      </div>
+      <div v-if="suggestedFollowUps.length" class="chatbot-follow-ups" aria-label="你可能还想问">
+        <span>你可能还想问</span>
+        <ElButton
+          v-for="question in suggestedFollowUps"
+          :key="question"
+          text
+          type="primary"
+          size="small"
+          @click="$emit('followUp', question)"
+        >{{ question }}</ElButton>
       </div>
       <details
         v-if="

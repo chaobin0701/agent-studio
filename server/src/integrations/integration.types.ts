@@ -52,6 +52,7 @@ export type IntegrationCallResult = {
   usage?: PublicAgentResult["usage"];
 };
 export type PublicAgentResult = {
+  contextUsage?: import("../chat/context-governor").ModelContextUsage;
   artifacts?: AgentArtifact[];
   references?: AgentReference[];
   structured?: JsonValue;

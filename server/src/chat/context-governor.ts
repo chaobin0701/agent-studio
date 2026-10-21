@@ -28,7 +28,7 @@ export type ContextEstimate = {
   remainingInputTokens: number;
   usagePercent: number;
   pressure: ContextPressure;
-  measurementSource: 'heuristic';
+  measurementSource: 'heuristic' | 'provider';
 };
 
 export function contextEstimate(budget: ContextBudget | undefined): ContextEstimate | undefined {
@@ -127,4 +127,56 @@ export class ContextGovernor {
 /** Conservative, dependency-free estimate until a provider tokenizer is available. */
 export function estimateTokens(value: string): number {
   return Math.max(1, Math.ceil(value.length / 2));
+}
+
+function estimateSerializedTokens(value: string): number {
+  let tokens = 0, asciiRun = 0;
+  const flushAscii = () => { if (asciiRun) tokens += Math.ceil(asciiRun / 4); asciiRun = 0; };
+  for (const character of value) {
+    if (/[\u3400-\u9fff\uf900-\ufaff\u3040-\u30ff\uac00-\ud7af]/u.test(character)) {
+      flushAscii();
+      tokens++;
+    } else if (/[a-z\d]/iu.test(character)) asciiRun++;
+    else if (/\s/u.test(character)) flushAscii();
+    else { flushAscii(); tokens++; }
+  }
+  flushAscii();
+  return Math.max(1, tokens);
+}
+
+/** Last actual model request, never the sum of a Run's token ledger. */
+export type ModelContextUsage = ContextEstimate & {
+  model: string;
+  maxOutputTokens: number;
+  safetyBufferTokens: number;
+  measuredAt: string;
+  includesDraft: false;
+};
+export function measureModelContext(
+  request: import("../ai/providers/provider.types").LlmRequest,
+  window: number,
+  inputTokens: number | null,
+): ModelContextUsage {
+  const maxOutputTokens = request.maxTokens ?? 0;
+  const safetyBufferTokens = Math.max(1024, Math.ceil(window * 0.05));
+  const inputBudgetTokens = Math.max(0, window - maxOutputTokens - safetyBufferTokens);
+  // Include actual system/history/tool results, tool definitions and response constraints.
+  // Image bytes are never serialized into estimates or public metadata.
+  const estimate = estimateSerializedTokens(JSON.stringify({
+    messages: request.messages, tools: request.tools,
+    responseFormat: request.responseFormat, toolChoice: request.toolChoice,
+  })) + (request.images ?? []).reduce((n, image) =>
+    n + 85 + 170 * Math.ceil(image.width / 512) * Math.ceil(image.height / 512), 0);
+  const actual = inputTokens !== null && Number.isFinite(inputTokens) && inputTokens >= 0;
+  const used = actual ? inputTokens : estimate;
+  const ratio = inputBudgetTokens > 0 ? used / inputBudgetTokens : 1;
+  return {
+    model: request.model, contextWindowTokens: window, maxOutputTokens, safetyBufferTokens,
+    inputBudgetTokens, estimatedInputTokens: used,
+    remainingInputTokens: Math.max(0, inputBudgetTokens - used),
+    usagePercent: Number((ratio * 100).toFixed(1)),
+    pressure: ratio < 0.7 ? "normal" : ratio < 0.85 ? "elevated" : ratio <= 1 ? "high" : "overflow",
+    measurementSource: actual ? "provider" : "heuristic",
+    measuredAt: new Date().toISOString(), includesDraft: false,
+  };
 }

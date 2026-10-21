@@ -5,46 +5,86 @@ import {readFileSync} from 'node:fs';
 import {runInNewContext} from 'node:vm';
 
 const require=createRequire(new URL('../apps/web-ele/package.json',import.meta.url));
-const vue=require('vue'),ts=require('typescript');
+const ts=require('typescript');
+const {ref}=require('vue');
 const {parse,compileTemplate}=require('vue/compiler-sfc');
-const source=readFileSync(new URL('../apps/web-ele/src/views/resources/agent-detail.vue',import.meta.url),'utf8');
-const {descriptor}=parse(source);
-const compiled=compileTemplate({source:descriptor.template.content,filename:'agent-detail.vue',id:'workbench'});
-assert.deepEqual(compiled.errors,[]);
-const output=ts.transpileModule(compiled.code,{compilerOptions:{module:ts.ModuleKind.CommonJS}}).outputText;
-const exports={};
-runInNewContext(output,{require,exports});
+const detail=readFileSync(new URL('../apps/web-ele/src/views/resources/agent-detail.vue',import.meta.url),'utf8');
+const panel=readFileSync(new URL('../apps/web-ele/src/views/playground/RunPanel.vue',import.meta.url),'utf8');
+const manager=readFileSync(new URL('../apps/web-ele/src/views/resources/index.vue',import.meta.url),'utf8');
+const target=readFileSync(new URL('../apps/web-ele/src/views/playground/target.ts',import.meta.url),'utf8');
+const {descriptor}=parse(detail);
+const compiled=compileTemplate({source:descriptor.template.content,filename:'agent-detail.vue',id:'agent-configuration'});
+const targetModule={exports:{}};
+runInNewContext(ts.transpileModule(target,{compilerOptions:{module:ts.ModuleKind.CommonJS}}).outputText,targetModule);
+const {playgroundRoute,selectedDraftQuery}=targetModule.exports;
 
-test('the actual Agent workbench template preserves both editors when switching narrow views or resizing',async()=>{
- const {h,ref,defineComponent,createRenderer,nextTick,onMounted,onBeforeUnmount}=vue;
- const instances={},counts={fields:0,trial:0},removed=[];
- const probe=kind=>defineComponent({setup(){const buffer=ref(kind==='trial'?'unfinished task and result':'configuration buffer');instances[kind]=buffer;onMounted(()=>counts[kind]++);onBeforeUnmount(()=>removed.push(kind));return ()=>h('div',buffer.value);}});
- const components=Object.fromEntries([...descriptor.template.content.matchAll(/<([A-Z]\w+)/g)].map(([,name])=>[name,defineComponent({setup(_,{slots,attrs}){return ()=>h('div',attrs,slots.default?.());}})]));
- components.RunPanel=probe('trial');components.Fields=probe('fields');
- components.ElDialog=defineComponent({setup(){return ()=>null;}});
- const state={wide:ref(false),mobile:ref('configuration'),section:ref('basic'),detail:{id:1,key:'test',enabled:true,versions:[]},current:null,status:'saved',busy:false,testing:false,editable:true,active:{id:2,status:'draft',revision:1,version:2},selected:2,name:ref('Test'),config:ref({}),canExecute:true,canManage:true,saveState:{conflict:false,error:'',saving:false},result:null,validName:true,hasChanges:true,access:{accessCodes:[]},prepare:async()=>true,resources:[],options:{},history:ref(false),emit(){},router:{push(){}}};
- const renderer=createRenderer({
-  createElement:tag=>({tag,children:[],props:{}}),createText:text=>({text}),createComment:text=>({comment:text}),
-  setText:(node,text)=>{node.text=text;},setElementText:(node,text)=>{node.text=text;node.children=[];},
-  patchProp:(node,key,_old,value)=>{node.props[key]=value;},
-  parentNode:node=>node.parent,nextSibling:node=>{const siblings=node.parent?.children??[];return siblings[siblings.indexOf(node)+1]??null;},
-  insert(node,parent,anchor=null){if(node.parent){const siblings=node.parent.children;siblings.splice(siblings.indexOf(node),1);}const at=anchor?parent.children.indexOf(anchor):-1;parent.children.splice(at<0?parent.children.length:at,0,node);node.parent=parent;},
-  remove(node){if(node.parent){const siblings=node.parent.children;siblings.splice(siblings.indexOf(node),1);node.parent=undefined;}},
- });
- const app=renderer.createApp(defineComponent({components,setup:()=>state,render:exports.render}));
- const root={children:[]};app.mount(root);await nextTick();
- const trial=instances.trial,fields=instances.fields;
- assert.deepEqual(counts,{fields:1,trial:1});
- trial.value='typed task, streamed answer';fields.value='edited configuration';
- for(const [wide,mobile] of [[false,'preview'],[false,'configuration'],[true,'configuration'],[false,'preview']]){
-  state.wide.value=wide;state.mobile.value=mobile;await nextTick();
-  assert.equal(instances.trial,trial);assert.equal(instances.fields,fields);
-  assert.equal(trial.value,'typed task, streamed answer');assert.equal(fields.value,'edited configuration');
-  assert.deepEqual(counts,{fields:1,trial:1});assert.deepEqual(removed,[]);
- }
- const walk=node=>[node,...(node.children??[]).flatMap(walk)];
- const panels=walk(root).filter(node=>node.props?.size);
- assert.equal(panels[0].props.size,'0%');assert.equal(panels[0].props.inert,true);
- assert.equal(panels[1].props.size,'100%');assert.equal(panels[1].props.inert,false);
- app.unmount();assert.equal(removed.length,2);
+test('Agent detail keeps configuration and links to the standalone playground',()=>{
+ assert.deepEqual(compiled.errors,[]);
+ assert.match(detail, /<Fields[\s\S]*kind="agent"/);
+ assert.match(detail, /@click="emit\('preview'\)"/);
+ assert.doesNotMatch(detail, /<RunPanel|<ElSplitter|ElSegmented|query\.tab/);
+ assert.match(manager, /version\.status === "draft" && !\(await preparePreview\(\)\)/);
+ assert.match(manager, /playgroundRoute\(detail\.value, selected\.value\)/);
+ assert.match(panel, /invalidTarget\.value \|\|/);
+ assert.match(panel, /optionUrl\.value/);
+});
+
+test('playground routing pins saved draft revisions and rejects incomplete links',()=>{
+ const agent={id:5,currentVersionId:10,versions:[{id:10,status:'published',revision:3},{id:11,status:'draft',revision:7}]};
+ assert.deepEqual(JSON.parse(JSON.stringify(playgroundRoute(agent,11))),{path:'/agent-playground',query:{agentId:'5',draftVersionId:'11',draftRevision:'7'}});
+ assert.deepEqual(JSON.parse(JSON.stringify(playgroundRoute(agent,10))),{path:'/agent-playground',query:{agentId:'5'}});
+ assert.equal(playgroundRoute({...agent,versions:[{id:11,status:'draft'}]},11),undefined);
+ assert.equal(playgroundRoute(agent,99),undefined);
+ assert.equal(selectedDraftQuery({draftVersionId:'11'}).valid,false);
+ assert.equal(selectedDraftQuery({draftVersionId:['11'],draftRevision:'7'}).valid,false);
+ assert.equal(selectedDraftQuery({draftVersionId:'11',draftRevision:'0'}).valid,false);
+ assert.deepEqual(JSON.parse(JSON.stringify(selectedDraftQuery({draftVersionId:'11',draftRevision:'7'}))),{valid:true,versionId:11,revision:7});
+});
+
+const handler=ts.transpileModule(manager.slice(manager.indexOf('async function preparePreview()'),manager.indexOf('const createBaseline = ref(')),{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText;
+function previewFixture({saved=true,get=async()=>undefined}={}) {
+ const calls=[],messages=[];
+ const draft={id:11,status:'draft',revision:7};
+ const agent={id:5,currentVersionId:10,versions:[{id:10,status:'published',revision:3},draft]};
+ const context={
+  route:{fullPath:'/agents/5'},workspace:{id:1,generation:0},
+  previewing:ref(false),busy:ref(false),kind:ref('agent'),toolContentValid:ref(true),dirty:ref(false),
+  detail:ref(agent),selected:ref(11),active:ref(draft),
+  draftQueue:{flush:async()=>{if(saved) draft.revision=8;return saved;}},
+  api:{get},router:{push:async(target)=>calls.push(target)},playgroundRoute,
+  ElMessage:{warning:(value)=>messages.push(value),error:(value)=>messages.push(value)},
+ };
+ runInNewContext(`${handler}\nglobalThis.handlers={openPreview};`,context);
+ return {context,calls,messages,openPreview:context.handlers.openPreview,agent,draft};
+}
+
+test('Agent trial opens the saved draft revision and never falls back after a failed save',async()=>{
+ const saved=previewFixture();
+ await saved.openPreview();
+ assert.deepEqual(JSON.parse(JSON.stringify(saved.calls)),[{path:'/agent-playground',query:{agentId:'5',draftVersionId:'11',draftRevision:'8'}}]);
+ const failed=previewFixture({saved:false});
+ await failed.openPreview();
+ assert.equal(failed.calls.length,0);
+});
+
+test('late Agent detail and list work never redirects after navigation or workspace change',async()=>{
+ let release;
+ const pending=new Promise((resolve)=>{release=resolve;});
+ const detailFixture=previewFixture();
+ detailFixture.context.draftQueue.flush=()=>pending;
+ const detailRun=detailFixture.openPreview();
+ detailFixture.context.route.fullPath='/tools';
+ release(true);
+ await detailRun;
+ assert.equal(detailFixture.calls.length,0);
+
+ let finish;
+ const read=new Promise((resolve)=>{finish=resolve;});
+ const listFixture=previewFixture({get:()=>read});
+ listFixture.context.route.fullPath='/agents';
+ const listRun=listFixture.openPreview({id:5});
+ listFixture.context.workspace.generation++;
+ finish(listFixture.agent);
+ await listRun;
+ assert.equal(listFixture.calls.length,0);
 });

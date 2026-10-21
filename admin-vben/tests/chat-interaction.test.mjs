@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { JSDOM } from "jsdom";
-import { parse, compileScript } from "@vue/compiler-sfc";
+import { parse, compileScript } from "vue/compiler-sfc";
 import ts from "typescript";
 
 const dom = new JSDOM("<!doctype html><html><body></body></html>");
@@ -18,7 +18,8 @@ for (const key of [
   "MouseEvent",
 ])
   globalThis[key] = dom.window[key];
-const require = createRequire(import.meta.url);
+const require = createRequire(new URL("../apps/web-ele/package.json", import.meta.url));
+const uiRequire = createRequire(require.resolve("@agent-studio/chat-ui"));
 const { createApp, h, reactive, nextTick } = require("vue");
 const source = await readFile(
   new URL("../../packages/chat-ui/src/ChatInteraction.vue", import.meta.url),
@@ -219,7 +220,7 @@ test("handled interactions move into one closed activity section, which closes a
     if(name==='vue-element-plus-x')return {Bubble:{setup:(_props,{slots})=>()=>h('div',slots.content?.())},FilesCard:{render:()=>null}};
     if(name==='element-plus')return {...controls,ElTag:{render:()=>null},ElImage:{render:()=>null}};
     if(name==='dompurify')return {default:require(name),__esModule:true};
-    return require(name);
+    return uiRequire(name);
   },loaded.exports,loaded);
   const props=reactive({message:{role:'assistant',content:'',progress:[{text:'读取资料'}],interactions:[
     {...base,id:'old',kind:'approval',status:'approved',toolName:'lookup',arguments:{private:'must-not-render'}},

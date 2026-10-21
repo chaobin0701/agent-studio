@@ -85,6 +85,9 @@ export class AdminChatbotController {
   @Get("options") options(@Req() r: AdminRequest) {
     return this.chat.options(this.principal(r));
   }
+  @Get("chat-status") chatStatus(@Req() r: AdminRequest) {
+    return this.chat.displayQuota(this.principal(r));
+  }
   @Get("sessions") list(@Req() r: AdminRequest, @Query("q") q?: string) {
     return this.chat.list(this.principal(r), q);
   }
@@ -232,6 +235,12 @@ export class WebsiteChatbotController {
     @Res({ passthrough: true }) response: Response,
   ) {
     return this.chat.options(await this.principal(r, response));
+  }
+  @Get("chat-status") async chatStatus(
+    @Req() r: IntegrationRequest,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    return this.chat.displayQuota(await this.principal(r, response));
   }
   @Get("sessions") async list(
     @Req() r: IntegrationRequest,

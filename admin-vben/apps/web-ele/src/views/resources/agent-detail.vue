@@ -1,26 +1,20 @@
 <script setup lang="ts">
 import { computed, ref, defineAsyncComponent } from "vue";
-import { useRouter, useRoute } from "vue-router";
+import { useRouter } from "vue-router";
 import { useAccessStore } from "@vben/stores";
-import { useMediaQuery } from "@vueuse/core";
 import {
   ElAlert,
   ElButton,
   ElDialog,
-  ElSegmented,
   ElTable,
   ElTableColumn,
   ElTabs,
   ElTabPane,
   ElTag,
-  ElSplitter,
-  ElSplitterPanel,
-  ElScrollbar,
   ElFormItem,
   ElInput,
 } from "element-plus";
 import Fields from "./fields.vue";
-import RunPanel from "../playground/RunPanel.vue";
 import type { DraftSaveState } from "#/composables/draft-queue";
 
 const props = defineProps<{
@@ -34,7 +28,7 @@ const props = defineProps<{
   contentValid: boolean;
   result?: any;
   saveState: DraftSaveState;
-  prepare: () => Promise<boolean>;
+  previewing: boolean;
 }>();
 const VersionDiff = defineAsyncComponent(
   () => import("../prompts/components/PromptDiff.vue"),
@@ -59,16 +53,12 @@ const emit = defineEmits<{
   toggle: [];
   refreshOptions: [];
   valid: [value: boolean];
+  preview: [];
 }>();
 const section = ref<
     "basic" | "abilities" | "collaboration" | "output" | "runtime"
   >("basic"),
-  mobile = ref(
-    useRoute().query.tab === "preview" ? "preview" : "configuration",
-  ),
-  history = ref(false),
-  testing = ref(false);
-const wide = useMediaQuery("(min-width: 1280px)");
+  history = ref(false);
 const router = useRouter(),
   access = useAccessStore();
 const active = computed(() =>
@@ -136,7 +126,7 @@ async function selectVersion(id: number) {
       <div class="flex flex-wrap gap-2">
         <ElButton
           v-if="!editable && canManage"
-          :disabled="busy || testing"
+          :disabled="busy || previewing"
           @click="emit('edit')"
           >编辑配置</ElButton
         >
@@ -145,7 +135,7 @@ async function selectVersion(id: number) {
           type="primary"
           :loading="busy"
           :disabled="
-            testing ||
+            previewing ||
             saveState.conflict ||
             !validName ||
             !contentValid ||
@@ -154,8 +144,15 @@ async function selectVersion(id: number) {
           @click="emit('publish')"
           >发布</ElButton
         >
-        <ElButton :disabled="busy || testing" @click="history = true"
+        <ElButton :disabled="busy || previewing" @click="history = true"
           >历史与差异</ElButton
+        >
+        <ElButton
+          v-if="canExecute"
+          :loading="previewing"
+          :disabled="busy"
+          @click="emit('preview')"
+          >试运行</ElButton
         >
         <ElButton
           v-if="access.accessCodes.includes('conversations.read')"
@@ -194,28 +191,8 @@ async function selectVersion(id: number) {
       type="warning"
       :closable="false"
     />
-    <ElSegmented
-      v-if="!wide"
-      v-model="mobile"
-      :options="[
-        { label: '配置', value: 'configuration' },
-        { label: '试运行', value: 'preview' },
-      ]"
-    />
-    <ElSplitter
-      class="agent-workbench bg-card"
-      :layout="wide ? 'horizontal' : 'vertical'"
-    >
-      <ElSplitterPanel
-        :size="wide ? '55%' : mobile === 'configuration' ? '100%' : '0%'"
-        :min="wide ? '40%' : undefined"
-        :resizable="wide"
-        :inert="!wide && mobile !== 'configuration'"
-        :aria-hidden="!wide && mobile !== 'configuration'"
-      >
-        <ElScrollbar height="100%">
-          <div class="min-w-0 p-4 md:p-6">
-            <ElTabs v-model="section" :before-leave="() => !busy && !testing">
+    <div class="min-w-0 rounded-md border border-border bg-card p-4 md:p-6">
+            <ElTabs v-model="section" :before-leave="() => !busy && !previewing">
               <ElTabPane name="basic" label="基本配置" />
               <ElTabPane name="abilities" label="能力" />
               <ElTabPane name="collaboration" label="协作" />
@@ -253,7 +230,7 @@ async function selectVersion(id: number) {
               :options="options"
               :resources="resources"
               :resource-id="detail.id"
-              :disabled="busy || testing || !editable"
+              :disabled="busy || previewing || !editable"
               full-width
               @valid="emit('valid', $event)"
               @refresh-options="emit('refreshOptions')"
@@ -293,44 +270,13 @@ async function selectVersion(id: number) {
                 >
                 <ElButton
                   v-if="canManage"
-                  :disabled="busy || testing"
+                  :disabled="busy || previewing"
                   @click="emit('toggle')"
                   >{{ detail.enabled ? "停用 Agent" : "启用 Agent" }}</ElButton
                 >
               </div>
             </div>
-          </div>
-        </ElScrollbar>
-      </ElSplitterPanel>
-      <ElSplitterPanel
-        :size="wide ? '45%' : mobile === 'preview' ? '100%' : '0%'"
-        :min="wide ? '32%' : undefined"
-        :resizable="wide"
-        :inert="!wide && mobile !== 'preview'"
-        :aria-hidden="!wide && mobile !== 'preview'"
-      >
-        <ElScrollbar height="100%">
-          <div class="min-w-0 p-4 md:p-6">
-            <RunPanel
-              v-if="canExecute"
-              embedded
-              :agent-id="detail.id"
-              :draft-version-id="editable ? active.id : undefined"
-              :draft-revision="editable ? active.revision : undefined"
-              :configuration-key="JSON.stringify({ name, config })"
-              :prepare="prepare"
-              @running="testing = $event"
-            />
-            <ElAlert
-              v-else
-              type="info"
-              :closable="false"
-              title="试运行需要启用 Agent，并具备配置管理和工具执行权限。"
-            />
-          </div>
-        </ElScrollbar>
-      </ElSplitterPanel>
-    </ElSplitter>
+    </div>
     <ElDialog
       class="management-dialog"
       body-class="management-dialog-body"
@@ -385,13 +331,13 @@ async function selectVersion(id: number) {
                 <ElButton
                   link
                   type="primary"
-                  :disabled="busy || testing"
+                  :disabled="busy || previewing"
                   @click="selectVersion(row.id)"
                   >查看</ElButton
                 >
                 <ElButton
                   link
-                  :disabled="busy || testing"
+                  :disabled="busy || previewing"
                   @click="
                     comparisonId = row.id;
                     historyTab = 'diff';
@@ -406,7 +352,7 @@ async function selectVersion(id: number) {
                   "
                   link
                   type="warning"
-                  :disabled="busy || testing"
+                  :disabled="busy || previewing"
                   @click="emit('activate', row.id)"
                   >回滚</ElButton
                 >
@@ -438,10 +384,3 @@ async function selectVersion(id: number) {
     </ElDialog>
   </div>
 </template>
-<style scoped>
-.agent-workbench {
-  height: clamp(24rem, calc(100dvh - 16rem), 64rem);
-  border: 1px solid hsl(var(--border));
-  border-radius: var(--radius);
-}
-</style>

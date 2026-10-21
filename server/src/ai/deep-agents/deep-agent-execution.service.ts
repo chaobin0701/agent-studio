@@ -609,6 +609,10 @@ export class DeepAgentExecutionService {
               onToolStarted: (name, callId) =>
                 toolProgress(name, callId, false),
               onModel: (model, purpose) => {
+                if (!depth && purpose === "planner" && model.context) {
+                  ownSnapshot.contextUsage = model.context;
+                  callbacks.onContextUsage?.(model.context);
+                }
                 if (purpose === "planner")
                   modelProgress(true, model.durationMs);
                 (ownSnapshot.executionSteps as unknown[]).push({

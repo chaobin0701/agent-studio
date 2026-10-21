@@ -83,6 +83,8 @@ type ConversationRow = {
 };
 type MessageRow = {
   interactions?:PublicInteraction[];
+  contextUsage?: import("./context-governor").ModelContextUsage;
+  structured?: ChatAnswer["structured"];
   artifacts?: ChatAnswer["artifacts"];
   id: number;
   role: "user" | "assistant";
@@ -294,15 +296,15 @@ export class ConversationService {
     await this.expireRuns(ownerId, id);
     await this.get(ownerId, id);
     const result = await this.database.query<MessageRow>(
-      `SELECT id::int, role, content, refused, citations, artifacts, tool_steps AS "toolSteps", progress_events AS "progressEvents", request_context AS context, created_at AS "createdAt"
+      `SELECT id::int, role, content, refused, citations, structured, artifacts, tool_steps AS "toolSteps", progress_events AS "progressEvents", request_context AS context, created_at AS "createdAt"
        FROM conversation_messages WHERE conversation_id = $1 ORDER BY id ASC`,
       [id],
     );
-    if(!this.interactions)return result.rows;
-    const linked=(await this.database.query<{messageId:number;callId:string}>("SELECT assistant_message_id::int AS \"messageId\",integration_call_id AS \"callId\" FROM conversation_runs WHERE conversation_id=$1 AND assistant_message_id IS NOT NULL AND integration_call_id IS NOT NULL",[id])).rows;
-    const cards=await this.interactions.listMany(linked.map(row=>row.callId));
+    const linked=(await this.database.query<{messageId:number;callId:string;contextUsage?:import("./context-governor").ModelContextUsage}>("SELECT r.assistant_message_id::int AS \"messageId\",r.integration_call_id AS \"callId\",c.response->'contextUsage' AS \"contextUsage\" FROM conversation_runs r LEFT JOIN integration_calls c ON c.id=r.integration_call_id WHERE r.conversation_id=$1 AND r.assistant_message_id IS NOT NULL AND r.integration_call_id IS NOT NULL",[id])).rows;
+    const cards=this.interactions ? await this.interactions.listMany(linked.map(row=>row.callId)) : new Map<string,PublicInteraction[]>();
     const byMessage=new Map(linked.map(row=>[row.messageId,cards.get(row.callId)??[]]));
-    return result.rows.map(row=>({...row,interactions:byMessage.get(row.id)??[]}));
+    const usageByMessage=new Map(linked.map(row=>[row.messageId,row.contextUsage]));
+    return result.rows.map(row=>({...row,...(this.interactions?{interactions:byMessage.get(row.id)??[]}:{}),...(usageByMessage.get(row.id)?{contextUsage:usageByMessage.get(row.id)}:{})}));
   }
 
   async context(ownerId: string, id: string) {
@@ -820,13 +822,14 @@ export class ConversationService {
         ],
       );
       const assistant = await client.query<{ id: number }>(
-        `INSERT INTO conversation_messages (conversation_id, role, content, refused, citations, tool_steps, progress_events, artifacts)
-         VALUES ($1, 'assistant', $2, $3, $4::jsonb, $5::jsonb, $6::jsonb, $7::jsonb) RETURNING id::int`,
+        `INSERT INTO conversation_messages (conversation_id, role, content, refused, citations, structured, tool_steps, progress_events, artifacts)
+         VALUES ($1, 'assistant', $2, $3, $4::jsonb, $5::jsonb, $6::jsonb, $7::jsonb, $8::jsonb) RETURNING id::int`,
         [
           conversationId,
           run.result.answer,
           run.result.refused,
           JSON.stringify(run.result.citations),
+          run.result.structured === undefined ? null : JSON.stringify(run.result.structured),
           JSON.stringify(run.result.toolSteps ?? []),
           JSON.stringify(run.result.progressEvents ?? []),
           JSON.stringify(run.result.artifacts ?? []),
@@ -953,7 +956,7 @@ export class ConversationService {
         "Saved request result is unavailable; retry with a new Idempotency-Key",
       );
     const result = await this.database.query<MessageRow>(
-      `SELECT content, refused, citations, artifacts, tool_steps AS "toolSteps", progress_events AS "progressEvents"
+      `SELECT content, refused, citations, structured, artifacts, tool_steps AS "toolSteps", progress_events AS "progressEvents"
        FROM conversation_messages WHERE id = $1 AND conversation_id = $2`,
       [run.assistantMessageId, run.conversationId],
     );
@@ -966,6 +969,7 @@ export class ConversationService {
       answer: message.content,
       refused: Boolean(message.refused),
       citations: message.citations ?? [],
+      ...(message.structured !== undefined && message.structured !== null ? { structured: message.structured } : {}),
       toolSteps: message.toolSteps ?? [],
       progressEvents: message.progressEvents ?? [],
       ...(message.artifacts?.length ? { artifacts: message.artifacts } : {}),

@@ -302,8 +302,8 @@ watch(
         :disabled="busy || loading || !detail.app.enabled || dirty"
         @click="
           router.push({
-            path: `/agents/${detail.app.agentId}`,
-            query: { tab: 'preview' },
+            path: '/agent-playground',
+            query: { agentId: String(detail.app.agentId) },
           })
         "
         >试运行</ElButton

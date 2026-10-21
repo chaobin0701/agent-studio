@@ -13,14 +13,15 @@ test("independent deployment exposes only ingress and preserves persistent data"
   assert.match(compose, /postgres_data:/);
   assert.match(compose, /uploads:/);
 });
-test("ingress preserves streaming and separates admin and neutral chat SPAs", () => {
+test("ingress preserves streaming and returns 404 for the removed independent chat", () => {
   const caddy = source("deploy/Caddyfile");
   assert.match(caddy, /flush_interval -1/);
   assert.match(caddy, /reverse_proxy api:3020/);
-  assert.match(caddy, /handle_path \/chat\/\*/);
+  assert.match(caddy, /@removedChat path \/chat \/chat\/\*/);
+  assert.match(caddy, /handle @removedChat \{\s+respond "Not Found" 404/);
   assert.equal(
     (caddy.match(/try_files \{path\} \/index.html/g) || []).length,
-    2,
+    1,
   );
   assert.doesNotMatch(source("deploy/edge.Dockerfile"), /COPY.*\.env/);
   assert.match(source(".dockerignore"), /\*\*\/\.env\*/);

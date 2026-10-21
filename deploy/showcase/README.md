@@ -1,6 +1,6 @@
 # Agent Studio + Demo Hub 展示环境
 
-此目录是两个独立开源项目在同一服务器上的部署入口。`Agent Studio` 提供后台、API、Worker 和中性聊天端；[Demo Hub](https://github.com/chaobin0701/demo-hub) 提供官网、两个体验和模拟业务数据。业务数据仅通过 Demo Hub 的 HTTP / MCP 工具接入平台。
+此目录是两个独立开源项目在同一服务器上的部署入口。`Agent Studio` 提供管理后台、后台聊天、API 和 Worker；[Demo Hub](https://github.com/chaobin0701/demo-hub) 提供官网、两个体验和模拟业务数据。业务数据仅通过 Demo Hub 的 HTTP / MCP 工具接入平台。
 
 ## 当前生产环境
 
@@ -8,7 +8,6 @@
 | --- | --- |
 | `https://hexu.7410000.xyz/` | Demo Hub 官网、项目介绍、两个 Demo 聊天与工具 |
 | `https://hexu-admin.7410000.xyz/` | Agent Studio 管理后台 |
-| `https://hexu-admin.7410000.xyz/chat/` | Agent Studio 中性聊天端 |
 | `https://hexu-admin.7410000.xyz/api/` | Agent Studio API |
 
 服务器工作目录为 `/opt/agent-studio`，Compose 项目名为 `agent-studio-showcase`。生产镜像分别为 `agent-studio-server`、`agent-studio-edge`、`demo-hub`，版本由私有 `.env` 的 `RELEASE_TAG` 固定。PostgreSQL、上传文件、Hub SQLite 数据库和 Caddy 证书均放在该目录的 `data/` 下；API 和 Hub 容器端口只绑定服务器回环地址，Caddy 占用公网 80/443。Worker 通过 `--profile worker` 启动。

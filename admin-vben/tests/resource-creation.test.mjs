@@ -21,7 +21,7 @@ function fixture(kind,post){
  const route={params:{},meta:{resourceKind:kind},fullPath:'/'+kind+'s'};
  const context={ref,computed,watch(){},defineAsyncComponent(){},onBeforeUnmount(){},setTimeout,clearTimeout,URL,
   newResourceKey,validResourceKey,createSkillDocument,skillCreateKey,createDraftQueue,httpToolConfig,toolTestExample,
-  useRoute:()=>route,useRouter:()=>({push:async path=>navigated.push(path)}),useAccessStore:()=>({accessCodes:['agent_config.manage','agent_tools.execute','prompts.manage']}),
+  useRoute:()=>route,useRouter:()=>({push:async path=>navigated.push(path)}),useWorkspaceStore:()=>({id:1,generation:0}),useAccessStore:()=>({accessCodes:['agent_config.manage','agent_tools.execute','prompts.manage']}),
   useUnsavedChanges:(dirty)=>{guards.push(dirty);return async()=>!dirty.value||allowDiscard;},
   api:{post:async(url,body)=>{requests.push({url,body:JSON.parse(JSON.stringify(body))});return post?post(url,body):{id:51,resourceId:51};}},
   ElMessage:{success(){},warning(){},info(){}},ElMessageBox:{confirm:async()=>{}},

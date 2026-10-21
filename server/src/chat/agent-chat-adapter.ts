@@ -89,6 +89,7 @@ function projectChatResult(task: TaskExecutionResult): PlatformAgentResult {
   return {
     ...task,
     result: {
+      ...(task.contextSnapshot.contextUsage ? { contextUsage: task.contextSnapshot.contextUsage as import("./context-governor").ModelContextUsage } : {}),
       answer: output.answer,
       refused: output.status === "refused",
       citations,

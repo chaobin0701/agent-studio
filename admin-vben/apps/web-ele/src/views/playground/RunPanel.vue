@@ -29,6 +29,7 @@ import { useWorkspaceStore } from "#/store/workspace";
 import { normalizeSchema } from "@agent-studio/output-contract";
 import JsonEditor from "#/components/JsonEditor.vue";
 import { ChatMessage } from "@agent-studio/chat-ui";
+import { selectedDraftQuery } from "./target";
 
 type Context = {
   agentId: number;
@@ -111,13 +112,24 @@ const agentId = computed(() => {
   const id = props.agentId ?? Number(route.query.agentId);
   return Number.isSafeInteger(id) && id > 0 ? id : undefined;
 });
+const routeDraft = computed(() => selectedDraftQuery(route.query));
+const draftTarget = computed(() =>
+  props.draftVersionId && props.draftRevision
+    ? { versionId: props.draftVersionId, revision: props.draftRevision }
+    : routeDraft.value.versionId && routeDraft.value.revision
+      ? { versionId: routeDraft.value.versionId, revision: routeDraft.value.revision }
+      : undefined,
+);
+const invalidTarget = computed(
+  () => !props.embedded && (!routeDraft.value.valid || (!!draftTarget.value && !agentId.value)),
+);
 const optionUrl = computed(() => {
   const path = agentId.value
     ? `/agent-preview/agents/${agentId.value}/options`
     : "/agent-preview/options";
   const draft =
-    props.draftVersionId && props.draftRevision
-      ? `?draftVersionId=${props.draftVersionId}&draftRevision=${props.draftRevision}`
+    draftTarget.value
+      ? `?draftVersionId=${draftTarget.value.versionId}&draftRevision=${draftTarget.value.revision}`
       : "";
   return path + draft;
 });
@@ -139,6 +151,7 @@ const schemaMessage = (value: unknown) => {
 const ready = computed(
   () =>
     canExecute.value &&
+    !invalidTarget.value &&
     context.value &&
     task.value.trim() &&
     !loading.value &&
@@ -173,9 +186,13 @@ async function load() {
   reset();
   if (
     (!props.embedded && route.name !== "AgentPlayground") ||
+    invalidTarget.value ||
     !canExecute.value
-  )
+  ) {
+    if (invalidTarget.value)
+      error.value = "草稿试运行链接缺少有效版本或修订号，请从 Agent 管理重新进入。";
     return;
+  }
   loading.value = true;
   try {
     const data = await api.get<Options>(optionUrl.value);
@@ -201,6 +218,7 @@ async function select() {
   context.value = undefined;
   reset();
   if (!application.value) return;
+  if (invalidTarget.value) return;
   loading.value = true;
   try {
     const data = await api.get<Options>(
@@ -324,7 +342,8 @@ watch(
     () => workspace.generation,
     () => route.name,
     agentId,
-    () => props.draftVersionId,
+    optionUrl,
+    invalidTarget,
     canExecute,
   ],
   () => {
@@ -362,6 +381,12 @@ onBeforeUnmount(() => {
       type="warning"
       :closable="false"
     />
+    <ElAlert
+      v-else-if="invalidTarget"
+      title="草稿试运行链接无效，请从 Agent 管理重新进入。"
+      type="error"
+      :closable="false"
+    />
     <div
       v-else
       :class="embedded ? 'space-y-6' : 'grid min-w-0 gap-4 lg:grid-cols-5'"
@@ -376,7 +401,7 @@ onBeforeUnmount(() => {
       >
         <div class="flex items-center justify-between gap-2">
           <h2 class="font-semibold">试运行</h2>
-          <ElTag v-if="draftVersionId" type="warning">草稿</ElTag>
+          <ElTag v-if="draftTarget" type="warning">草稿</ElTag>
         </div>
         <ElAlert
           v-if="stale && (result || live.runId)"
@@ -416,8 +441,8 @@ onBeforeUnmount(() => {
               @click="
                 router.push({
                   path: '/integrations',
-                  query: props.agentId
-                    ? { agentId: String(props.agentId) }
+                  query: agentId
+                    ? { agentId: String(agentId) }
                     : {},
                 })
               "

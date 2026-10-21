@@ -24,7 +24,6 @@ if (!existsSync(file)) {
 for (const [command, args] of [
   ["npm", ["ci", "--prefix", "server", "--install-links=true"]],
   ["pnpm", ["--dir", "admin-vben", "install", "--frozen-lockfile"]],
-  ["npm", ["ci", "--prefix", "chat", "--install-links=true"]],
 ]) {
   const result = spawnSync(command, args, { cwd: root, stdio: "inherit" });
   if (result.error) throw result.error;

@@ -7,10 +7,7 @@ const require = createRequire(
   new URL("../apps/web-ele/package.json", import.meta.url),
 );
 const uiRequire = createRequire(require.resolve("@agent-studio/chat-ui"));
-const chatRequire = createRequire(
-  new URL("../../chat/package.json", import.meta.url),
-);
-const { JSDOM } = chatRequire("jsdom");
+const { JSDOM } = require("jsdom");
 const { computed } = require("vue"),
   ts = require("typescript"),
   { Marked } = uiRequire("marked");
