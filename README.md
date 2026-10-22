@@ -2,9 +2,9 @@
 
 **构建、发布并运行通用 Agent 的开源平台。** 在一个工作区管理模型、Prompt、Skill、知识库和工具，让同一套执行能力可以通过后台聊天和 API 接入不同应用。
 
-[在线应用体验](https://hexu.7410000.xyz/) · [独立展示站 Demo Hub](https://github.com/chaobin0701/demo-hub) · [部署说明](deploy/showcase/README.md)
+[在线应用体验](https://hexu.7410000.xyz/) · [独立展示站 Agent Studio Showcase](https://github.com/chaobin0701/agent-studio-showcase) · [部署说明](deploy/showcase/README.md)
 
-Agent Studio 负责资源版本、权限和执行；业务系统继续拥有自己的数据。扫地机器人和户外装备顾问是由独立 Demo Hub 接入的示例应用，不是平台内置业务流程。
+Agent Studio 负责资源版本、权限和执行；业务系统继续拥有自己的数据。扫地机器人和户外装备顾问是由独立展示站 Agent Studio Showcase 接入的示例应用，不是平台内置业务流程。
 
 ## 项目亮点
 
@@ -53,9 +53,9 @@ npm run dev
 
 默认地址：管理后台 `http://localhost:8085`、API `http://localhost:3020`，PostgreSQL 本机端口 `5437`。首次登录后，先配置供应商连接与模型方案，再创建并发布 Prompt 和 Agent；需要对外聊天时，在后台创建接入应用，绑定已发布 Agent 并设置允许的 Origin。Agent 管理页的“试运行”进入独立任务页面；草稿试运行固定当前已保存修订。
 
-外部聊天界面可通过接入应用调用平台 API；Demo Hub 是独立项目中的示例。应用 ID 是公开标识，浏览器使用服务端签发的短期访客令牌，**不能放入平台 API Key**。测试和启动不会自动启用应用或扩大 Origin。
+外部聊天界面可通过接入应用调用平台 API；Agent Studio Showcase 是独立项目中的示例。应用 ID 是公开标识，浏览器使用服务端签发的短期访客令牌，**不能放入平台 API Key**。测试和启动不会自动启用应用或扩大 Origin。
 
-需要交互式提问时，在工具管理创建并测试、发布内置 `ask_user`，再绑定到单 Agent；需要审批时开启相应工具的“调用前需批准”，按现有版本流程发布。后台聊天与 Demo Hub 均支持卡片、刷新恢复及历史查看。配置方式、API 与支持边界见[补充信息与工具审批](docs/human-interactions.md)。
+需要交互式提问时，在工具管理创建并测试、发布内置 `ask_user`，再绑定到单 Agent；需要审批时开启相应工具的“调用前需批准”，按现有版本流程发布。后台聊天与 Agent Studio Showcase 均支持卡片、刷新恢复及历史查看。配置方式、API 与支持边界见[补充信息与工具审批](docs/human-interactions.md)。
 
 ## 验证与部署
 
@@ -65,6 +65,6 @@ npm run build
 npm test
 ```
 
-PostgreSQL 集成测试需显式配置 `TEST_DATABASE_URL`，使用临时 schema 并在结束后清理，不使用业务数据库。单独生产部署见 `compose.production.yml`；Agent Studio 与 Demo Hub 同机部署、备份和回滚见[展示环境手册](deploy/showcase/README.md)。首次全新生产部署使用 `admin:bootstrap` 创建管理员，不复用开发库账户。
+PostgreSQL 集成测试需显式配置 `TEST_DATABASE_URL`，使用临时 schema 并在结束后清理，不使用业务数据库。单独生产部署见 `compose.production.yml`；Agent Studio 与 Agent Studio Showcase 同机部署、备份和回滚见[展示环境手册](deploy/showcase/README.md)。首次全新生产部署使用 `admin:bootstrap` 创建管理员，不复用开发库账户。
 
 仓库不包含原业务数据库、演示用户、上传文件、供应商密钥或聊天记录。业务系统通过 HTTP / MCP 接入；展示站和平台不共享业务数据库或执行内核。来源与第三方许可见 [SOURCE.md](SOURCE.md)，项目代码采用 [MIT 许可](LICENSE)。

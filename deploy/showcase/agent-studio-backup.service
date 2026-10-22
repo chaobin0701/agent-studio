@@ -1,5 +1,5 @@
 [Unit]
-Description=Back up Agent Studio and Demo Hub production data
+Description=Back up Agent Studio and Showcase production data
 Requires=docker.service
 After=docker.service
 

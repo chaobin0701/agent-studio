@@ -1,12 +1,12 @@
-# Agent Studio + Demo Hub 展示环境
+# Agent Studio + Showcase 展示环境
 
-此目录是两个独立开源项目在同一服务器上的部署入口。`Agent Studio` 提供管理后台、后台聊天、API 和 Worker；[Demo Hub](https://github.com/chaobin0701/demo-hub) 提供官网、两个体验和模拟业务数据。业务数据仅通过 Demo Hub 的 HTTP / MCP 工具接入平台。
+此目录是两个独立开源项目在同一服务器上的部署入口。`Agent Studio` 提供管理后台、后台聊天、API 和 Worker；[Agent Studio Showcase](https://github.com/chaobin0701/agent-studio-showcase) 提供官网、两个体验和模拟业务数据。业务数据仅通过 Showcase 的 HTTP / MCP 工具接入平台。
 
 ## 当前生产环境
 
 | 入口 | 路由 |
 | --- | --- |
-| `https://hexu.7410000.xyz/` | Demo Hub 官网、项目介绍、两个 Demo 聊天与工具 |
+| `https://hexu.7410000.xyz/` | Showcase 官网、项目介绍、两个 Demo 聊天与工具 |
 | `https://hexu-admin.7410000.xyz/` | Agent Studio 管理后台 |
 | `https://hexu-admin.7410000.xyz/api/` | Agent Studio API |
 
@@ -31,7 +31,7 @@ latest="$(find backups -mindepth 1 -maxdepth 1 -type d -name '20*' | sort | tail
 
 `backup.sh` 每次在线导出 PostgreSQL，使用 SQLite 在线备份 API 复制 Hub 数据库，再归档上传文件、Caddy 状态、Compose 与私有环境配置；生成 `manifest.sha256` 后才将临时目录移入 `backups/`。`agent-studio-backup.timer` 每天按上海时间 03:45 运行。备份含密钥，必须维持私有目录权限并交由管理员设置异地留存和保留周期。
 
-公网检查：访问官网、两个 Demo 和后台；检查 `/api/health`。在携带生产工具令牌的受控环境中，可以运行 Demo Hub 的 `scripts/verify-production.mjs --tools-only` 对照 HTTP/MCP；完整验证还会发起真实 Agent 对话。运行前必须显式设置 `SITE_ORIGIN` 与必要令牌。常规测试、构建不会启动这个脚本，也不会自动启用应用或扩大 Origin。
+公网检查：访问官网、两个 Demo 和后台；检查 `/api/health`。在携带生产工具令牌的受控环境中，可以运行 Showcase 的 `scripts/verify-production.mjs --tools-only` 对照 HTTP/MCP；完整验证还会发起真实 Agent 对话。运行前必须显式设置 `SITE_ORIGIN` 与必要令牌。常规测试、构建不会启动这个脚本，也不会自动启用应用或扩大 Origin。
 
 ## 回滚
 
