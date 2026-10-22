@@ -980,6 +980,58 @@ test("standard LangChain output strategy validates structured results with one c
   assert.deepEqual(deltas, ["Sum confirmed"]);
 });
 
+test("streams only the partial structured answer before the formatter completes", async () => {
+  const f = fixture(() => {
+    throw new Error("structured formatter should use the provider stream");
+  });
+  const wire = JSON.stringify({
+    answer: "Hello from structured output",
+    structured: { suggestedFollowUps: ["Next question"] },
+  });
+  let providerCompleted = false,
+    providerStreamCalls = 0;
+  f.provider.stream = async function* () {
+    providerStreamCalls++;
+    for (const [index, part] of wire.match(/.{1,4}/gu).entries()) {
+      yield {
+        type: "tool_call_delta",
+        index: 0,
+        ...(index === 0 ? { id: "formatter-call", name: "agent_result" } : {}),
+        argumentsDelta: part,
+      };
+    }
+    providerCompleted = true;
+    yield {
+      type: "completed",
+      usage: { inputTokens: 3, outputTokens: 2, totalTokens: 5 },
+      finishReason: "tool_calls",
+    };
+  };
+  const deltas = [];
+  const result = await f.harness.run(
+    {
+      ...input(),
+      outputSchema: {
+        type: "object",
+        properties: { suggestedFollowUps: { type: "array", items: { type: "string" } } },
+        required: ["suggestedFollowUps"],
+        additionalProperties: false,
+      },
+    },
+    {
+      ...f.options,
+      onAnswerDelta: (text) => {
+        assert.equal(providerCompleted, false);
+        deltas.push(text);
+      },
+    },
+  );
+  assert.equal(deltas.join(""), "Hello from structured output");
+  assert.deepEqual(result.result.structured, { suggestedFollowUps: ["Next question"] });
+  assert.equal(providerCompleted, true);
+  assert.equal(providerStreamCalls, 1);
+});
+
 test("invalid structured formatter output fails without SDK repair, legacy fallback or paid-work replay", async () => {
   const f = fixture(() =>
     calls([

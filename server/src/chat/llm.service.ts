@@ -98,6 +98,7 @@ export type LlmCompletionOptions = {
 
 export type LlmStreamCallbacks = {
   onTextDelta?: (text: string) => void;
+  onToolCallDelta?: (call: { index: number; name: string; arguments: string }) => void;
   onRetryStatus?: (event: RetryStatusEvent) => void;
 };
 
@@ -732,6 +733,11 @@ export class LlmService {
                 if (event.argumentsDelta)
                   call.arguments += event.argumentsDelta;
                 calls.set(event.index, call);
+                callbacks.onToolCallDelta?.({
+                  index: event.index,
+                  name: call.name,
+                  arguments: call.arguments,
+                });
               } else {
                 completed = true;
                 usage = event.usage;

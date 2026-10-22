@@ -54,6 +54,7 @@
     "multer": "^2.4.0",
     "node-pg-migrate": "^9.0.0",
     "parse5": "^8.0.1",
+    "partial-json": "^0.1.7",
     "pdfjs-dist": "^6.3.289",
     "pg": "^8.23.0",
     "pg-boss": "^12.33.0",

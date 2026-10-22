@@ -65,6 +65,11 @@ export class PlatformChatModel extends BaseChatModel<PlatformModelOptions> {
       error: ModelFailure,
     ) => void,
     private readonly images?: readonly LlmImage[],
+    private readonly onToolCallDelta?: (call: {
+      index: number;
+      name: string;
+      arguments: string;
+    }) => void,
   ) {
     super({ maxRetries: 0 });
   }
@@ -196,6 +201,7 @@ export class PlatformChatModel extends BaseChatModel<PlatformModelOptions> {
             pending.push(delta);
             wake?.();
           },
+          onToolCallDelta: this.onToolCallDelta,
           onRetryStatus: this.onRetryStatus,
         },
       )

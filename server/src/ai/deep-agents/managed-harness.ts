@@ -69,6 +69,7 @@ import {
 } from "./final-output";
 import type { ToolExecutionOutcome } from "../tools/tool-execution";
 import { resultEnvelopeSchema, assertStructuredResult } from "./output-schema";
+import { partialJsonAnswer } from "./partial-json-answer";
 import type { ContextResource } from "../context/context-contribution";
 import { redactToolData } from "../../tool-management/network";
 import { FileOutputError } from "../../artifacts/file-output";
@@ -307,7 +308,8 @@ export class ManagedDeepAgentHarness {
       actualUsage.totalTokens += value.totalTokens ?? 0;
     };
     let bufferedText = "",
-      emittedAnswer = "";
+      emittedAnswer = "",
+      structuredAnswerEmitted = false;
     // LangChain may replace model errors without preserving cause/prototype.
     // Keep the domain error in live context, never serialized framework state.
     let modelFailure: unknown;
@@ -315,6 +317,7 @@ export class ManagedDeepAgentHarness {
       if (emittedAnswer) options.onAnswerReset?.("");
       bufferedText = "";
       emittedAnswer = "";
+      structuredAnswerEmitted = false;
     };
     const model = new PlatformChatModel(
       this.llm,
@@ -328,7 +331,11 @@ export class ManagedDeepAgentHarness {
         formatterSeen = formatted.length === 1;
         formatterCandidate = formatterSeen ? formatted[0].arguments : undefined;
         options.onModel?.(value, "planner");
-        if (value.toolCalls.length) resetAnswer();
+        if (
+          value.toolCalls.length &&
+          !(input.outputSchema && formatted.length === 1 && structuredAnswerEmitted)
+        )
+          resetAnswer();
       },
       undefined,
       options.onAnswerDelta
@@ -350,6 +357,18 @@ export class ManagedDeepAgentHarness {
         options.onModelFailure?.(failure, "planner");
       },
       options.images,
+      input.outputSchema
+        ? ({ name, arguments: partialArguments }) => {
+            if (name !== formatterName) return;
+            const answer = partialJsonAnswer(partialArguments);
+            if (answer === undefined || answer === emittedAnswer) return;
+            if (answer.startsWith(emittedAnswer))
+              options.onAnswerDelta?.(answer.slice(emittedAnswer.length));
+            else options.onAnswerReset?.(answer);
+            emittedAnswer = answer;
+            structuredAnswerEmitted = true;
+          }
+        : undefined,
     );
     const summaryModel = new PlatformChatModel(
       this.llm,

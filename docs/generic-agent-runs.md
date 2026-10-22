@@ -69,7 +69,7 @@ JSON／SSE 最终结果包含：`runId`、`traceId`、`agentId`、`agentVersionI
 
 `usage` 来自已有模型尝试账本，而不是把子图用量重复累加作为费用。拒绝回答是已结束的正常结果；异常、取消和超时保存为失败。请求父追踪覆盖结果持久化和计费完成；若计费完成失败，保留已付模型用量并更新失败 Trace，不再次调用模型／工具。未知供应商费用不会因为断流而免费释放。
 
-SSE 使用 `run_started`、`answer_delta`／`answer_reset`、`progress`、公开 commentary、`retry_status`、`done` 或 `error`。需要用户回应时发送 `interaction_required` 并关闭当前流，此时为 `waiting`，不发送完成或错误；非流式返回 202。`done` 是唯一的最终结果，文本增量仍是临时内容；重放只发送开始及最终结果，不重新生成增量。活动执行中关闭连接取消同一执行图，不重启任务；已持久化的等待由回应接口继续。
+SSE 使用 `run_started`、`answer_delta`／`answer_reset`、`progress`、公开 commentary、`retry_status`、`done` 或 `error`。结构化模式从格式化工具参数的部分 JSON 中提取顶层 `answer`，并复用 `answer_delta`／`answer_reset`；不发送原始 JSON。自定义 `structured` 仅在完整结果通过 Schema 校验后随 `done` 返回。需要用户回应时发送 `interaction_required` 并关闭当前流，此时为 `waiting`，不发送完成或错误；非流式返回 202。`done` 是唯一的最终结果，文本增量仍是临时内容；若最终校验失败，已发送的答案仍属于未完成响应；重放只发送开始及最终结果，不重新生成增量。活动执行中关闭连接取消同一执行图，不重启任务；已持久化的等待由回应接口继续。
 
 ## 幂等与历史
 
