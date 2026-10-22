@@ -4,7 +4,7 @@
 
 在一个统一的工作区中管理模型方案、业务 Prompt、可复用 Skill、知识库与外部工具，让具备自主决策能力的智能体能够安全、可靠地发布，并通过统一的聊天接口或 API 接入各类终端应用。
 
-[在线应用体验](https://hexu.7410000.xyz/) · [官方展示站 (Agent Studio Showcase)](https://github.com/chaobin0701/agent-studio-showcase) · [系统架构](#系统架构与执行模型) · [核心特性](#核心能力与设计亮点) · [快速上手](#快速上手) · [展示环境部署](deploy/showcase/README.md)
+[在线应用体验](https://hexu.7410000.xyz/) · [官方展示站 (Agent Studio Showcase)](https://github.com/chaobin0701/agent-studio-showcase)
 
 ---
 
@@ -22,47 +22,70 @@ Agent Studio 遵循三项核心设计原则，以应对企业级 AI 应用在生
 
 Agent Studio 由**资产编排层**、**状态执行引擎**与**外部接入网关**构成完整的生产级闭环：
 
-```text
-┌────────────────────────────────────────────────────────────────────────┐
-│                              接入与消费层                              │
-│                                                                        │
-│   ┌────────────────────┐   ┌────────────────────┐   ┌────────────────┐ │
-│   │  管理后台试运行     │   │  外部应用接入 API   │   │  官方展示站    │ │
-│   │  (Playground)      │   │  (Client App Token)│   │  (Showcase)    │ │
-│   └─────────┬──────────┘   └─────────┬──────────┘   └────────┬───────┘ │
-└─────────────┼────────────────────────┼───────────────────────┼─────────┘
-              │                        │ (SSE 流式长连接)       │
-              ▼                        ▼                       ▼
-┌────────────────────────────────────────────────────────────────────────┐
-│                        Agent Studio 运行时服务                         │
-│                                                                        │
-│   ┌───────────────────────────┐    ┌────────────────────────────────┐  │
-│   │  网关安全、鉴权与用量预算   │───►│  生效版本快照解析器            │  │
-│   └───────────────────────────┘    └───────────────┬────────────────┘  │
-│                                                    │                   │
-│                                                    ▼                   │
-│   ┌────────────────────────────────────────────────────────────────┐   │
-│   │         LangGraph / Deep Agents 多轮状态图执行引擎              │   │
-│   │                                                                │   │
-│   │    [模型规划与决策] ──► [工具选择与执行] ──► [观察与反思循环]   │   │
-│   │           │                     │                              │   │
-│   │           ▼                     ▼                              │   │
-│   │   ┌──────────────┐     ┌──────────────────┐                    │   │
-│   │   │ 结构化输出校验│     │人机协作中断(HITL)│                    │   │
-│   │   │ (JSON Schema)│     │(提问/调用前审批) │                    │   │
-│   │   └──────────────┘     └────────┬─────────┘                    │   │
-│   └─────────────────────────────────┼──────────────────────────────┘   │
-└─────────────────────────────────────┼──────────────────────────────────┘
-                                      │ 持久化挂起 / 检查点恢复
-                                      ▼
-┌────────────────────────────────────────────────────────────────────────┐
-│                             基础设施与数据                             │
-│                                                                        │
-│  ┌───────────────────────┐ ┌───────────────────┐ ┌───────────────────┐ │
-│  │   PostgreSQL 关系存储  │ │   pgvector 向量库   │ │   pg-boss 异步队列  │ │
-│  │ (RLS 隔离 / 版本快照) │ │ (混合 RAG 检索分块) │ │ (文档解析与索引建表)│ │
-│  └───────────────────────┘ └───────────────────┘ └───────────────────┘ │
-└────────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+    subgraph Clients ["  接入与消费层 (Clients & Apps)  "]
+        direction LR
+        Admin["🖥️ 管理控制台<br/>Playground"]
+        API["🔌 外部应用接入<br/>Client App Token"]
+        Showcase["🌐 官方展示站<br/>Agent Studio Showcase"]
+    end
+
+    subgraph Runtime ["  Agent Studio 平台运行时服务 (Runtime Engine)  "]
+        direction TB
+        Gateway["🛡️ 网关安全与鉴权中心<br/>(Origin 校验 / 租户预算 / 速率限制)"]
+        Snapshot["📦 生效版本快照解析器<br/>(固定 Agent / Prompt / Tool 版本哈希)"]
+
+        subgraph StateGraph ["  LangGraph / Deep Agents 多轮状态图执行内核  "]
+            direction TB
+            Planner["🧠 决策与规划 (LLM Loop)"]
+            Router{"能力路由与工具分发"}
+            Hitl["⏸️ 人机协同中断 (HITL)<br/>(主动提问 ask_user / 敏感工具前置审批)"]
+            SchemaValidate["📋 结构化输出校验<br/>(JSON Schema 契约)"]
+
+            Planner --> Router
+            Router -->|"需要用户交互 / 审批"| Hitl
+            Hitl -->|"用户答复后恢复任务"| Planner
+            Router -->|"生成最终响应"| SchemaValidate
+        end
+
+        Gateway --> Snapshot --> Planner
+    end
+
+    subgraph Capabilities ["  外部能力与资产 (Capabilities & Tools)  "]
+        direction LR
+        Providers["🤖 模型服务商<br/>(OpenAI / DeepSeek / Ollama)"]
+        RAG["📚 混合 RAG 检索<br/>(全文索引 + pgvector + RRF 融合)"]
+        Tools["⚡ 扩展工具与协议<br/>(REST HTTP API / Streamable MCP)"]
+    end
+
+    subgraph Storage ["  基础设施与持久化 (Storage & Infrastructure)  "]
+        direction LR
+        PG[("🐘 PostgreSQL<br/>(RLS 隔离 / 版本快照)")]
+        Checkpointer[("💾 状态检查点 (Checkpoints)<br/>(支持断流重连与无损恢复)")]
+        Worker["⚙️ pg-boss 异步 Worker<br/>(文档分块 / 向量化索引)"]
+    end
+
+    Clients ==>|"SSE 流式协议 / 长连接"| Gateway
+    Router <==>|"推理调用"| Providers
+    Router <==>|"文档召回"| RAG
+    Router <==>|"执行工具"| Tools
+    Hitl -.->|"状态挂起持久化"| Checkpointer
+    Snapshot -.->|"读取快照"| PG
+    RAG -.->|"异步建索任务"| Worker
+    Worker -.->|"向量与全文存储"| PG
+
+    classDef clientNode fill:#f8fafc,stroke:#94a3b8,stroke-width:1.5px,color:#0f172a;
+    classDef runtimeNode fill:#f0f9ff,stroke:#0284c7,stroke-width:1.5px,color:#0369a1;
+    classDef graphNode fill:#ffffff,stroke:#2563eb,stroke-width:1.5px,color:#1e3a8a;
+    classDef capNode fill:#fffbeb,stroke:#d97706,stroke-width:1.5px,color:#92400e;
+    classDef storageNode fill:#f0fdf4,stroke:#16a34a,stroke-width:1.5px,color:#166534;
+
+    class Admin,API,Showcase clientNode;
+    class Gateway,Snapshot runtimeNode;
+    class Planner,Router,Hitl,SchemaValidate graphNode;
+    class Providers,RAG,Tools capNode;
+    class PG,Checkpointer,Worker storageNode;
 ```
 
 ---
