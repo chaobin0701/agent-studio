@@ -1,3 +1,4 @@
+import { uiBlocks } from "../tool-management/ui-tool";
 import {
   ConflictException,
   ForbiddenException,
@@ -537,6 +538,7 @@ export class AgentRunService {
       answer,
       artifacts,
       references,
+      uiBlocks: uiBlocks(artifacts, runId),
       ...(structured !== undefined ? { structured } : {}),
       ...(usage ? { usage } : {}),
       ...(contextUsage ? { contextUsage } : {}),

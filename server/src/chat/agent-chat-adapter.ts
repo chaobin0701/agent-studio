@@ -1,3 +1,4 @@
+import { uiBlocks } from "../tool-management/ui-tool";
 import type { CompositionSnapshot } from "../agent-management/runtime-scope";
 import type { DeepAgentExecutionService } from "../ai/deep-agents/deep-agent-execution.service";
 import type {
@@ -39,7 +40,7 @@ export async function executeAgentChat(
     },
     callbacks,
   );
-  const result = projectChatResult(taskResult);
+  const result = projectChatResult(taskResult, input.runId ?? input.traceId ?? "");
   result.contextSnapshot.entryPoint = "chat";
   result.contextSnapshot.contextMemory = input.restoredContext?.diagnostics;
   if (input.requestContext && Object.keys(input.requestContext).length)
@@ -65,7 +66,7 @@ export async function executeAgentChat(
   return result;
 }
 
-function projectChatResult(task: TaskExecutionResult): PlatformAgentResult {
+function projectChatResult(task: TaskExecutionResult, runId: string): PlatformAgentResult {
   const byId = new Map(task.sources.map((hit) => [hit.chunkId, hit]));
   const citations = task.output.references.flatMap((reference) => {
     const hit =
@@ -90,6 +91,7 @@ function projectChatResult(task: TaskExecutionResult): PlatformAgentResult {
     ...task,
     result: {
       ...(task.contextSnapshot.contextUsage ? { contextUsage: task.contextSnapshot.contextUsage as import("./context-governor").ModelContextUsage } : {}),
+      uiBlocks: uiBlocks(output.artifacts, runId),
       answer: output.answer,
       refused: output.status === "refused",
       citations,

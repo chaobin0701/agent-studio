@@ -32,7 +32,7 @@ export type PublicProgressEvent = {
   ok?: boolean;
 };
 export type ProcessEvent = ({ type: 'tool' } & ToolStep) | CommentaryEvent | PublicProgressEvent;
-export type ChatAnswer = { contextUsage?: import("./context-governor").ModelContextUsage; answer: string; refused: boolean; citations: Citation[]; artifacts?:AgentArtifact[];references?:AgentReference[];structured?:JsonValue;toolSteps?: ToolStep[]; progressEvents?: ProcessEvent[]; context?: ContextEstimate };
+export type ChatAnswer = { uiBlocks?: import("../tool-management/ui-tool").UiBlock[]; contextUsage?: import("./context-governor").ModelContextUsage; answer: string; refused: boolean; citations: Citation[]; artifacts?:AgentArtifact[];references?:AgentReference[];structured?:JsonValue;toolSteps?: ToolStep[]; progressEvents?: ProcessEvent[]; context?: ContextEstimate };
 export type ChatStreamCallbacks = {
   onContextUsage?: (context: import("./context-governor").ModelContextUsage) => void;
   /** Server-owned continuation bridge; never accepted from public JSON. */
@@ -41,6 +41,7 @@ export type ChatStreamCallbacks = {
   integrationCallId?: string;
   /** Trusted transport cancellation, never read from request JSON. */
   signal?: AbortSignal;
+  onToolUi?: (block: import("../tool-management/ui-tool").UiBlock) => void;
   onAnswerStarted?: (metadata: { citations: Citation[] }) => void;
   onAnswerDelta?: (text: string) => void;
   /** Replace provisional body; done remains authoritative. */

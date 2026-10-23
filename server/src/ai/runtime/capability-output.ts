@@ -14,6 +14,7 @@ const artifactSchema = z
     kind: z.string().min(1).max(80),
     id: z.string().min(1).max(200).optional(),
     data: z.json(),
+    delivery: z.literal("immediate").optional(),
   })
   .strict();
 const referenceSchema = z
@@ -112,9 +113,10 @@ export function selectCapabilityOutputs(
   },
   available: Partial<CapabilityOutputs>,
 ) {
-  if (final.status !== "answered") return {};
+  const published = (available.artifacts ?? []).filter(a => a.delivery === "immediate");
+  if (final.status !== "answered") return published.length ? { artifacts: published } : {};
   const artifacts = (available.artifacts ?? []).filter(
-    (a) => a.id && final.artifactIds?.includes(a.id),
+    (a) => a.delivery === "immediate" || (a.id && final.artifactIds?.includes(a.id)),
   );
   const references = uniqueCapabilityReferences(
     available.references ?? [],

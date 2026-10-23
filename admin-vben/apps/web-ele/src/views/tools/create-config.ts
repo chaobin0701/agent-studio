@@ -57,7 +57,9 @@ export function builtinToolConfig(
   };
 }
 
-export function toolTestExample(config: { type?: string; target?: string }) {
+export function toolTestExample(config: { type?: string; target?: string; uiCatalog?: { components?: Record<string, unknown> } }) {
+  if (config.type === "ui" && config.uiCatalog?.components?.Card)
+    return { _type: "Card", title: "示例摘要" };
   return config.type === "builtin" && config.target === "ask_user"
     ? {
         question: "你的预算是多少？",
@@ -68,4 +70,10 @@ export function toolTestExample(config: { type?: string; target?: string }) {
         allowCustom: true,
       }
     : {};
+}
+
+/** Catalog is imported from a deployed showcase; it uses the existing Tool release workflow. */
+export function uiToolConfig() {
+  return { description: "使用 present 展示数据摘要、图表或表格。仅在可视化有助于解释时调用。", type: "ui", target: "present", uiCatalog: null,
+    parameters: { type: "object", properties: {} }, timeoutMs: 30000, maxRetries: 0, readOnly: true, requiresApproval: false };
 }

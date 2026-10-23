@@ -1,3 +1,4 @@
+import { uiBlocks } from "../tool-management/ui-tool";
 import type { Response } from "express";
 import type { AgentRunService } from "./agent-run.service";
 import { publicIntegrationError } from "../integrations/quota-error";
@@ -51,6 +52,7 @@ export async function runResponse(
   heartbeat.unref();
   try {
     const result = await runs.execute(prepared, transport.signal, {
+      onArtifact: artifact => { for(const block of uiBlocks([artifact], prepared.admission.callId)) send("tool_ui", block); },
       onAnswerDelta: (text) => send("answer_delta", { text }),
       onAnswerReset: (text) => send("answer_reset", { text }),
       onProgress: (event) =>

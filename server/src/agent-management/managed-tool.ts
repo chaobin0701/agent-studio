@@ -1,3 +1,4 @@
+import { makeUiTool } from "../tool-management/ui-tool";
 import { z } from "zod";
 import { toolArgumentsHash } from "../ai/tools/tool-context";
 import type { AgentTool } from "../ai/tools/agent-tool";
@@ -13,8 +14,8 @@ export function makeManagedTool(
   deps: HttpDependencies = {},
 ): AgentTool {
   const spec = v.config as ToolSpec;
-  const base = spec.type === "rest" ? undefined : lookup(spec.target!);
-  const schema = z.fromJSONSchema(spec.parameters as any);
+  const base = spec.type === "ui" ? makeUiTool(spec.uiCatalog) : spec.type === "rest" ? undefined : lookup(spec.target!);
+  const schema = spec.type === "ui" ? base!.inputSchema : z.fromJSONSchema(spec.parameters as any);
   return {
     execution: {
       ...base?.execution,
@@ -27,7 +28,7 @@ export function makeManagedTool(
     runtimeLimits: { maxRetries: spec.maxRetries, timeoutMs: spec.timeoutMs },
     name: v.key,
     description: spec.description,
-    inputSchema: base ? z.intersection(base.inputSchema, schema) : schema,
+    inputSchema: base && spec.type !== "ui" ? z.intersection(base.inputSchema, schema) : schema,
     parameters: spec.parameters,
     capabilities: base?.capabilities,
     contributeContext: base?.contributeContext,

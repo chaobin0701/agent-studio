@@ -556,7 +556,7 @@ async function create() {
     return;
   }
   const createKey =
-    kind.value === "tool" && config.value.type === "builtin"
+    kind.value === "tool" && ["builtin", "ui"].includes(config.value.type)
       ? config.value.target
       : key.value.trim() || generatedCreateKey.value;
   if (kind.value !== "skill" && (!createKey || !name.value.trim())) {
@@ -1252,9 +1252,9 @@ watch(
                 <ElFormItem label="稳定 Key">
                   <ElInput
                     :model-value="
-                      config.type === 'builtin' ? config.target : key
+                      ['builtin', 'ui'].includes(config.type) ? config.target : key
                     "
-                    :disabled="config.type === 'builtin'"
+                    :disabled="['builtin', 'ui'].includes(config.type)"
                     maxlength="80"
                     placeholder="留空自动生成；自定义使用小写字母、数字和下划线"
                     @update:model-value="key = $event"

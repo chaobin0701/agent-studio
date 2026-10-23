@@ -1,3 +1,4 @@
+import { uiBlocks } from "../tool-management/ui-tool";
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, Logger, NotFoundException, Optional } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
 import { IntegrationService } from "../integrations/integration.service";
@@ -238,6 +239,7 @@ export class IntegrationChatGateway {
       answer,
       refused,
       citations,
+      uiBlocks: uiBlocks(artifacts, runId ?? ""),
       ...(usage ? { usage } : {}),
       ...(context ? { context } : {}),
       ...(progressEvents ? { progressEvents } : {}),

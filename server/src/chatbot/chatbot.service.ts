@@ -1,3 +1,4 @@
+import { uiBlocks } from "../tool-management/ui-tool";
 import {
   BadRequestException,
   ConflictException,
@@ -279,6 +280,7 @@ export class ChatbotService implements OnApplicationShutdown {
               ? "本轮未完成，请明确发起新消息重试"
               : undefined),
         artifacts: response?.artifacts ?? [],
+        uiBlocks: uiBlocks(response?.artifacts, t.id),
         references: response?.references ?? [],
         ...(response?.structured!==undefined?{structured:response.structured}:{}),
         usage: response?.usage,
@@ -507,6 +509,7 @@ export class ChatbotService implements OnApplicationShutdown {
       try {
         const execute = () =>
           this.runs.execute(prepared, active.abort.signal, {
+            onArtifact: artifact => { for(const block of uiBlocks([artifact], prepared.admission.callId)) emit("tool_ui", block); },
             onAnswerDelta: (text) => {
               active.answer = (active.answer + text).slice(0, 200000);
               emit("answer_delta", { text });

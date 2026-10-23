@@ -23,6 +23,7 @@ import SchemaEditor from "./SchemaEditor.vue";
 import {
   builtinToolConfig,
   httpToolConfig,
+  uiToolConfig,
   type BuiltinToolOption,
 } from "./create-config";
 const config = defineModel<any>({ required: true });
@@ -57,12 +58,21 @@ function selectBuiltin(target: string) {
 function selectType(type: string) {
   if (!props.creating || props.disabled || config.value.type === type) return;
   if (type === "rest") config.value = httpToolConfig();
+  else if (type === "ui") config.value = uiToolConfig();
   else if (type === "builtin") {
     const option =
       builtinOptions.value.find((item) => item.key === "ask_user") ??
       builtinOptions.value[0];
     if (option) selectBuiltin(option.key);
   }
+}
+const uiCatalog = computed({
+  get: () => config.value.uiCatalog,
+  set: value => { config.value.uiCatalog = value; config.value.parameters = value?.parameters ?? { type: "object", properties: {} }; },
+});
+function validateCatalog(value: any) {
+  return value?.adapter === "assistant-ui" && value?.version && value?.parameters?.type === "object" && Object.keys(value?.components ?? {}).length
+    ? undefined : "请粘贴展示站导出的完整组件目录";
 }
 const outputEnabled = computed({
   get: () => !!config.value.outputSchema,
@@ -104,6 +114,7 @@ function credential(value: number | undefined) {
         @change="selectType"
       >
         <ElOption value="rest" label="HTTP 工具" />
+        <ElOption value="ui" label="生成式 UI（assistant-ui）" />
         <ElOption
           value="builtin"
           label="内置工具"
@@ -114,7 +125,7 @@ function credential(value: number | undefined) {
           ? "HTTP 工具"
           : config.type === "builtin"
             ? "内置工具"
-            : "MCP 工具"
+            : config.type === "ui" ? "生成式 UI（assistant-ui）" : "MCP 工具"
       }}</span></ElFormItem
     >
     <ElFormItem
@@ -137,6 +148,13 @@ function credential(value: number | undefined) {
         />
       </ElSelect>
     </ElFormItem>
+    <template v-if="config.type === 'ui'">
+      <ElAlert title="从展示站运行 npm run ui:catalog 导出目录并粘贴。保存、测试并发布此 Tool 版本后，由 Agent 显式绑定。新增组件不需要后端部署。" type="info" :closable="false" class="mb-4" />
+      <ElFormItem label="展示站组件目录" required>
+        <JsonValueEditor v-model="uiCatalog" kind="object" label="组件目录" :height="320" :readonly="disabled" :validate-value="validateCatalog" @valid="value => validity('input', value)" />
+      </ElFormItem>
+      <p v-if="config.uiCatalog" class="mb-4 text-sm text-muted-foreground">{{ Object.keys(config.uiCatalog.components ?? {}).join(' · ') }} · {{ config.uiCatalog.version }}</p>
+    </template>
     <ElFormItem label="用途 / 使用时机" required
       ><ElInput
         v-model="config.description"
@@ -299,7 +317,7 @@ function credential(value: number | undefined) {
       </template>
     </template>
   </div>
-  <div v-show="show('result')">
+  <div v-show="show('result') && config.type !== 'ui'">
     <ElDivider v-if="!section || section === 'all'">返回结果</ElDivider>
     <ElFormItem v-if="config.type === 'rest'" label="结果提取路径"
       ><ElInput
@@ -323,7 +341,7 @@ function credential(value: number | undefined) {
         @valid="(value) => validity('output', value)"
     /></ElFormItem>
   </div>
-  <div v-show="show('runtime')">
+  <div v-show="show('runtime') && config.type !== 'ui'">
     <ElDivider v-if="!section || section === 'all'">安全与执行策略</ElDivider>
     <div class="grid grid-cols-1 gap-x-4 sm:grid-cols-2">
       <ElFormItem label="仅读取，不修改数据"

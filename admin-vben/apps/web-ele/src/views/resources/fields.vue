@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, watch } from "vue";
+import { computed, ref, watch } from "vue";
 import OutputContractEditor from "./OutputContractEditor.vue";
 import SkillFields from "./skill/fields.vue";
 import ToolFields from "../tools/ToolFields.vue";
@@ -201,13 +201,13 @@ const choices = (kind: string) =>
   props.resources
     .filter(
       (r) =>
-        r.kind === (kind === "mcp" ? "tool" : kind) &&
+        r.kind === (["mcp", "ui"].includes(kind) ? "tool" : kind) &&
         r.enabled &&
         !r.archivedAt &&
         !r.deletedAt &&
-        (kind === "mcp"
-          ? r.toolType === "mcp"
-          : kind !== "tool" || r.toolType !== "mcp") &&
+        (["mcp", "ui"].includes(kind)
+          ? r.toolType === kind
+          : kind !== "tool" || !["mcp", "ui"].includes(r.toolType)) &&
         (kind !== "tool" ||
           ![
             "search_knowledge",
@@ -221,11 +221,20 @@ const choices = (kind: string) =>
         .filter((v: any) => v.status === "published")
         .map((v: any) => ({ ...v, name: r.name, key: r.key })),
     );
+const selectedUi = computed({
+  get: () => selectedResources("ui", "toolVersionIds")[0],
+  set: value => updateResources("ui", "toolVersionIds", value ? [value] : []),
+});
+const uiEnabled = computed({
+  get: () => !!selectedUi.value,
+  set: value => { if (!value) selectedUi.value = undefined; },
+});
+const uiChoosing = ref(false);
 const selectedSkills = computed(() =>
   choices("skill").filter((s) => config.value.skillVersionIds?.includes(s.id)),
 );
 const selectedTools = computed(() =>
-  [...choices("tool"), ...choices("mcp")].filter((t) =>
+  [...choices("tool"), ...choices("mcp"), ...choices("ui")].filter((t) =>
     config.value.toolVersionIds?.includes(t.id),
   ),
 );
@@ -324,6 +333,15 @@ function updateResources(kind: string, field: string, selected: number[]) {
                 :value="r.id"
                 :label="`${r.name} · v${r.version}`" /></ElSelect
           ></ElFormItem>
+          <ElFormItem label="生成式 UI（展示站）">
+            <div class="w-full space-y-3">
+              <ElSwitch :model-value="uiEnabled || uiChoosing" :disabled="disabled" @update:model-value="value => { uiChoosing = !!value; if (!value) uiEnabled = false; }" />
+              <p class="text-sm text-muted-foreground">默认关闭。开启并选择已发布的 present 组件目录后，Agent 才能调用。</p>
+              <ElSelect v-if="uiEnabled || uiChoosing" v-model="selectedUi" :disabled="disabled" clearable placeholder="选择已发布的 UI Tool 版本" class="w-full">
+                <ElOption v-for="r in choices('ui')" :key="r.id" :value="r.id" :label="`${r.name} · v${r.version}`" />
+              </ElSelect>
+            </div>
+          </ElFormItem>
           <div class="flex flex-wrap gap-2" aria-label="Agent 能力概览">
             <ElTag type="info">{{ selectedSkills.length }} 项指导资料</ElTag>
             <ElTag type="info">{{ selectedTools.length }} 项授权工具</ElTag>

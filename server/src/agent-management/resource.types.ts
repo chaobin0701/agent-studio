@@ -1,3 +1,4 @@
+import { uiCatalogSchema } from "../tool-management/ui-tool";
 import { z } from 'zod';
 import { DEFAULT_AGENT_CONFIGURATION } from '../config/agent-config';
 import { agentRetrievalSchema } from '../documents/knowledge-config';
@@ -79,7 +80,8 @@ export const skillSchema = z.object({
 }).strict().refine(v => v.resources.length === 0 || Buffer.byteLength(JSON.stringify(v)) <= SKILL_RESOURCE_LIMITS.configBytes, '含辅助资料的 Skill 配置总量不能超过 384 KiB');
 export const toolSchema = z.object({
   description: z.string().trim().min(1).max(2000),
-  type: z.enum(['builtin', 'rest', 'mcp']),
+  type: z.enum(['builtin', 'rest', 'mcp', 'ui']),
+  uiCatalog: uiCatalogSchema.optional(),
   target: z.string().regex(/^[A-Za-z0-9_.-]{1,128}$/).optional(),
   mcpVersionId: z.number().int().positive().optional(),
   parameters: z.record(z.string(), z.unknown()),
@@ -92,7 +94,9 @@ export const toolSchema = z.object({
   requiresApproval: z.boolean().default(false),
 }).strict().superRefine((v,c) => {
   if(v.type==='rest' && !v.endpoint) c.addIssue({code:'custom',path:['endpoint'],message:'需要端点'});
-  if(v.type!=='rest' && !v.target) c.addIssue({code:'custom',path:['target'],message:'需要已注册工具'});
+  if(v.type!=='rest' && v.type!=='ui' && !v.target) c.addIssue({code:'custom',path:['target'],message:'需要已注册工具'});
+  if(v.type==='ui' && (!v.uiCatalog || v.target!=='present' || !v.readOnly || v.requiresApproval || v.maxRetries!==0 || v.endpoint || v.outputSchema)) c.addIssue({code:'custom',message:'UI 工具必须为只读 present，并导入组件目录；不支持审批、重试、端点和输出映射'});
+  if(v.type!=='ui' && v.uiCatalog) c.addIssue({code:'custom',message:'只有 UI 工具允许组件目录'});
   if(v.mcpVersionId && v.type!=='mcp')c.addIssue({code:'custom',path:['mcpVersionId'],message:'只有 MCP 工具可以关联 MCP 服务版本'});
   if(!v.readOnly && v.maxRetries>0 && !v.idempotencyHeader) c.addIssue({code:'custom',path:['maxRetries'],message:'写操作自动重试需要幂等键'});
   if(v.type==='rest' && v.readOnly && v.endpoint?.method!=='GET') c.addIssue({code:'custom',path:['readOnly'],message:'只读 REST 工具必须使用 GET'});

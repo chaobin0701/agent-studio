@@ -143,6 +143,7 @@ export type ManagedHarnessOptions = {
     purpose: "planner" | "summary",
   ) => void;
   /** The trusted host may project explicitly declared business resources. */
+  onArtifact?: (artifact: import("../agent/execution-contract").AgentArtifact) => void;
   onToolStarted?: (name: string, callId: string) => void;
   onTool?: (
     name: string,
@@ -266,10 +267,13 @@ export class ManagedDeepAgentHarness {
             ...outcome.result,
             references: [...(outcome.result.references ?? []), ...references],
           },
-          `deep-tool-${logicalToolCalls}`,
+          nativeCallId,
           options.maxToolResultChars ?? 12000,
         );
         outputs.artifacts.push(...projected.artifacts);
+        for (const artifact of projected.artifacts) if (artifact.delivery === "immediate") {
+          try { options.onArtifact?.(artifact); } catch { /* Delivery never replays a completed tool. */ }
+        }
         outputs.references.push(...projected.references);
         return projected;
       },
@@ -635,6 +639,9 @@ export class ManagedDeepAgentHarness {
                   options.maxToolResultChars ?? 12000,
                 );
                 outputs.artifacts.push(...projected.artifacts);
+                for (const artifact of projected.artifacts) if (artifact.delivery === "immediate") {
+                  try { options.onArtifact?.(artifact); } catch { /* Delivery never replays a completed tool. */ }
+                }
                 const memberFiles =
                   options.fileOutputs?.fromMember?.(
                     child.artifacts,
@@ -841,6 +848,9 @@ export class ManagedDeepAgentHarness {
                 options.maxToolResultChars ?? 12000,
               );
               outputs.artifacts.push(...projected.artifacts);
+              for (const artifact of projected.artifacts) if (artifact.delivery === "immediate") {
+                try { options.onArtifact?.(artifact); } catch { /* Delivery never replays a completed tool. */ }
+              }
               outputs.references.push(...projected.references);
             },
             onWorkflow: options.onWorkflow,

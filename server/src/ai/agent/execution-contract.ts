@@ -21,7 +21,7 @@ export type AgentReference = {
   title?: string;
   metadata?: JsonObject;
 };
-export type AgentArtifact = { kind: string; id?: string; data: JsonValue };
+export type AgentArtifact = { kind: string; id?: string; delivery?: "immediate"; data: JsonValue };
 export type AgentUsage = {
   inputTokens: number | null;
   outputTokens: number | null;

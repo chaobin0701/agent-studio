@@ -606,6 +606,7 @@ export class DeepAgentExecutionService {
                   });
                 }
               },
+              onArtifact: depth === 0 ? callbacks.onArtifact : undefined,
               onToolStarted: (name, callId) =>
                 toolProgress(name, callId, false),
               onModel: (model, purpose) => {

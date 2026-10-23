@@ -54,6 +54,7 @@ export type IntegrationCallResult = {
 export type PublicAgentResult = {
   contextUsage?: import("../chat/context-governor").ModelContextUsage;
   artifacts?: AgentArtifact[];
+  uiBlocks?: import("../tool-management/ui-tool").UiBlock[];
   references?: AgentReference[];
   structured?: JsonValue;
   progressEvents?: ProcessEvent[];

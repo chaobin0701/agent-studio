@@ -1,3 +1,5 @@
+import { toolArgumentsHash } from "../ai/tools/tool-context";
+import { compileUiCatalog } from "../tool-management/ui-tool";
 import { effectiveAgentVersion } from './effective-agent-version';
 import { BadRequestException, ConflictException, Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { createHash } from 'node:crypto';
@@ -353,11 +355,15 @@ export class AgentManagementService {
    }
   } else if(v.kind==='tool') {
    this.assertManagedTool(v.kind,v.key,spec);
-   try { z.fromJSONSchema(spec.parameters); } catch { throw new BadRequestException('工具 JSON Schema 无法解析'); }
+   if(spec.type==='ui') {
+    if(v.key!=='present') throw new BadRequestException('生成式 UI 工具 Key 必须为 present');
+    try { const {catalog}=compileUiCatalog(spec.uiCatalog); if(toolArgumentsHash(catalog.parameters)!==toolArgumentsHash(spec.parameters)) throw new Error('present 参数必须与目录一致'); } catch(error) { throw new BadRequestException(error instanceof Error ? error.message : 'UI 目录无效'); }
+   }
+   try { if(spec.type!=='ui') z.fromJSONSchema(spec.parameters); } catch { throw new BadRequestException('工具 JSON Schema 无法解析'); }
    if(spec.parameters.type!=='object') throw new BadRequestException('工具参数必须使用 object JSON Schema');
    await this.externalTools?.validateTool(spec);
-   if(spec.type!=='rest' && !spec.mcpVersionId && !this.tools.has(spec.target)) throw new BadRequestException('只可绑定已注册的内置或 MCP 工具');
-   if(spec.type!=='rest' && !spec.mcpVersionId && v.key!==spec.target) throw new BadRequestException('内置和 MCP 工具 Key 必须与注册名称一致');
+   if(spec.type!=='rest' && spec.type!=='ui' && !spec.mcpVersionId && !this.tools.has(spec.target)) throw new BadRequestException('只可绑定已注册的内置或 MCP 工具');
+   if(spec.type!=='rest' && spec.type!=='ui' && !spec.mcpVersionId && v.key!==spec.target) throw new BadRequestException('内置和 MCP 工具 Key 必须与注册名称一致');
    if(spec.type!=='rest' && !spec.readOnly && spec.maxRetries>0) throw new BadRequestException('写入型内置或 MCP 工具暂不支持自动重试；幂等请求头仅适用于 REST 工具');
    if(spec.type==='mcp' && !spec.mcpVersionId && !spec.target.startsWith('mcp_')) throw new BadRequestException('MCP 工具必须引用已注册的 MCP 名称');
    if(spec.type==='rest' && spec.endpoint.connection!=='application') { const url=new URL(spec.endpoint.url); if(!['https:','http:'].includes(url.protocol)||url.username||url.password) throw new BadRequestException('无效工具端点'); }

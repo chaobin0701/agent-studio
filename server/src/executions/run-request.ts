@@ -75,6 +75,7 @@ export const runRequestSchema = z
   );
 export type RunRequest = z.infer<typeof runRequestSchema>;
 export type PublicRunResult = Omit<AgentFinalOutput, "usage"> & {
+  uiBlocks?: import("../tool-management/ui-tool").UiBlock[];
   contextUsage?: import("../chat/context-governor").ModelContextUsage;
   runId: string;
   traceId: string;

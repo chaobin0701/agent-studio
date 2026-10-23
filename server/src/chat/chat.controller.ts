@@ -168,6 +168,7 @@ export class ChatController {
             signal: transport.signal,
             onAnswerStarted: metadata => this.writeEvent(response, 'answer_started', metadata),
             onAnswerDelta: text => { streamed = true; this.writeEvent(response, 'answer_delta', { text }); },
+            onToolUi: block => this.writeEvent(response, 'tool_ui', block),
             onAnswerReset: text => this.writeEvent(response, 'answer_reset', { text }),
             onProgress: event => this.writeEvent(response, 'progress', event),
             onCommentaryDelta: ({ id, text }) => { startCommentary(id); this.writeEvent(response, 'commentary_delta', { id, text }); },

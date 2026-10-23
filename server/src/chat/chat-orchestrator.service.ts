@@ -1,3 +1,4 @@
+import { uiBlocks } from "../tool-management/ui-tool";
 import { AgentManagementService } from "../agent-management/agent-management.service";
 import { runtimeScope } from "../agent-management/runtime-scope";
 import { AgentExecutionService } from "../ai/runtime/agent-execution.service";
@@ -265,6 +266,7 @@ export class ChatOrchestratorService {
       onCommentary: emitCommentary,
       onCommentaryDelta: emitCommentaryDelta,
       onRetryStatus: emitRetryStatus,
+      onArtifact: artifact => { for(const block of uiBlocks([artifact], input.runId ?? input.traceId ?? "")) callbacks?.onToolUi?.(block); },
       onAnswerDelta: deliverAnswer,
       onAnswerReset: resetAnswer,
     };
