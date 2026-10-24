@@ -31,8 +31,8 @@ export const configSchema = z.object({
     secret: z.string().default(''),
     issuer: z.string().trim().min(1).default('agent-studio'),
     audience: z.string().trim().min(1).default('agent-studio-admin'),
-    expiresInSeconds: z.coerce.number().int().min(60).max(86_400).default(900),
-  }).default({ secret: '', issuer: 'agent-studio', audience: 'agent-studio-admin', expiresInSeconds: 900 }),
+    expiresInSeconds: z.coerce.number().int().min(60).max(86_400).default(86_400),
+  }).default({ secret: '', issuer: 'agent-studio', audience: 'agent-studio-admin', expiresInSeconds: 86_400 }),
   modelConfigEncryptionKey: z.string().default(''),
   security: z.object({
     trustProxy: z.coerce.number().int().min(0).max(10).default(DEFAULT_TRUST_PROXY),

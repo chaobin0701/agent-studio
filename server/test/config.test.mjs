@@ -8,6 +8,7 @@ test('configuration applies safe defaults without requiring an LLM key', () => {
   assert.equal(config.uploadRoot, '/data/uploads');
   assert.equal(config.jwt.issuer, 'agent-studio');
   assert.equal(config.jwt.audience, 'agent-studio-admin');
+  assert.equal(config.jwt.expiresInSeconds, 86_400);
   assert.equal(config.security.chatWindowLimit, 10);
   assert.equal(config.security.documentUploadConcurrency, 2);
   assert.equal(config.embedding.model, 'doubao-embedding-vision-251215');
@@ -27,6 +28,7 @@ test('configuration parses explicit security boundaries', () => {
   const config = readConfigEnvironment({
     DATABASE_URL: 'postgres://example',
     JWT_SECRET: 'a'.repeat(32),
+    JWT_EXPIRES_IN_SECONDS: '3600',
     TRUST_PROXY: '2',
     ALLOWED_ORIGINS: 'http://localhost:8081, https://admin.example.com',
     CHAT_RATE_LIMIT: '20',
@@ -35,6 +37,7 @@ test('configuration parses explicit security boundaries', () => {
     EMBEDDING_MODEL: 'test-embedding',
   });
   assert.equal(config.databaseUrl, 'postgres://example');
+  assert.equal(config.jwt.expiresInSeconds, 3600);
   assert.equal(config.security.trustProxy, 2);
   assert.deepEqual(config.security.allowedOrigins, ['http://localhost:8081', 'https://admin.example.com']);
   assert.equal(config.security.chatWindowLimit, 20);
