@@ -8,6 +8,7 @@ import { compileUiCatalog, makeUiTool, uiBlocks } from "../dist/tool-management/
 import { makeManagedTool } from "../dist/agent-management/managed-tool.js";
 import { ToolExecutionService } from "../dist/ai/tools/tool-execution.js";
 import { ToolPolicy } from "../dist/ai/tools/tool-policy.js";
+import { executionContextView } from "../dist/observability/execution-view.js";
 
 function catalog() {
   const props = {
@@ -27,6 +28,99 @@ function catalog() {
 
 const fact = { _type: "Fact", label: "Revenue", value: 42 };
 const final = answer => JSON.stringify({ type: "final", status: "answered", answer, citationIds: [], artifactIds: [] });
+
+function nestedCatalog() {
+  const source = catalog();
+  source.components.Row = { description: "Layout", children: true, props: { type: "object", properties: {}, additionalProperties: false } };
+  source.components.Table = { description: "Table", children: false, props: {
+    type: "object", properties: { caption: { type: "string" }, columns: { type: "array", items: { type: "string" } } },
+    required: ["caption", "columns"], additionalProperties: false,
+  } };
+  const node = {
+    type: "object", properties: {
+      ...source.parameters.properties, _type: { enum: Object.keys(source.components) },
+      caption: { type: "string" }, columns: { type: "array", items: { type: "string" } },
+      children: { anyOf: [{ type: "string" }, { $ref: "#/$defs/node" }, { type: "array", items: { $ref: "#/$defs/node" } }] },
+    }, required: ["_type"],
+  };
+  source.parameters = { ...node, $defs: { node } };
+  source.version = toolArgumentsHash({ parameters: source.parameters, components: source.components });
+  return source;
+}
+
+test("Ajv errors retain component and JSON Pointer while withholding argument values and unknown property names", () => {
+  const { diagnose, validate } = compileUiCatalog(nestedCatalog());
+  const tree = { _type: "Row", children: [{ _type: "Table", columns: ["PRIVATE_VALUE"], label: "PRIVATE_VALUE", PRIVATE_FIELD: "PRIVATE_VALUE" }] };
+  assert.equal(validate(tree), false);
+  const diagnostics = diagnose(tree);
+  assert.ok(diagnostics.issues.some(issue => issue.path === "/children/0" && issue.component === "Table" && issue.field === "caption" && issue.keyword === "required"));
+  assert.ok(diagnostics.issues.some(issue => issue.field === "label" && issue.keyword === "additionalProperties"));
+  assert.doesNotMatch(JSON.stringify(diagnostics), /PRIVATE_/);
+  assert.deepEqual(diagnose({ ...fact, value: "PRIVATE_VALUE" }).issues, [{ path: "/value", component: "Fact", keyword: "type" }]);
+  assert.equal(validate({ _type: "Row", children: [fact, { _type: "Table", caption: "Facts", columns: ["Name"] }] }), true);
+});
+
+test("platform limits remain bounded and do not relax component validation", () => {
+  const { diagnose, validate } = compileUiCatalog(nestedCatalog());
+  const wrap = children => ({ _type: "Row", children });
+  assert.equal(diagnose(wrap(Array.from({ length: 41 }, () => fact))).issues[0].keyword, "maxItems");
+  assert.equal(diagnose(Array.from({ length: 9 }).reduce(wrap, fact)).issues[0].keyword, "depth_limit");
+  const short = { _type: "Fact", label: "x", value: 1 };
+  assert.equal(diagnose(wrap([wrap(Array(40).fill(short)), wrap(Array(40).fill(short))])).issues[0].keyword, "node_limit");
+  assert.equal(diagnose({ ...fact, label: "x".repeat(6000) }).issues[0].keyword, "size_limit");
+  assert.equal(diagnose({ ...fact, label: "x".repeat(501) }).issues[0].keyword, "maxLength");
+  assert.equal(validate({ ...fact, _key: "x".repeat(101) }), false);
+});
+
+test("managed present preserves published parameters and returns Ajv guidance without extra tool execution", async () => {
+  const source = nestedCatalog();
+  const tool = makeManagedTool({ id: 9, key: "present", config: {
+    type: "ui", description: "Custom description", uiCatalog: source, parameters: source.parameters,
+    readOnly: true, requiresApproval: false, maxRetries: 0, timeoutMs: 10000,
+  } }, () => { throw Error("Unexpected registry lookup"); });
+  assert.deepEqual(tool.parameters, source.parameters);
+  assert.match(tool.description, /Custom description/);
+  assert.match(tool.description, /Table: 必填 caption, columns/);
+  const service = new ToolExecutionService({ get: () => tool }, new ToolPolicy());
+  const logs = [];
+  service.logger.warn = message => logs.push(JSON.parse(message));
+  const outcome = await service.execute("present", { _type: "Table", columns: ["PRIVATE_VALUE"] }, {
+    permissions: [], state: new Map(), traceId: "trace-1", sessionId: "session-1",
+  }, service.createStateForAgent(["present"], 3));
+  assert.equal(outcome.result.errorCode, "invalid_arguments");
+  assert.equal(outcome.result.artifacts, undefined);
+  assert.match(outcome.result.content, /caption/);
+  assert.equal(logs[0].event, "tool_input_validation_failed");
+  assert.equal(logs[0].toolVersionId, 9);
+  assert.equal(logs[0].traceId, "trace-1");
+  assert.doesNotMatch(JSON.stringify(logs), /PRIVATE_VALUE/);
+  const view = executionContextView({ toolCalls: [{ ...outcome.trace, validation: {
+    ...outcome.trace.validation, arguments: "PRIVATE_ARGUMENTS", issues: [
+      ...outcome.trace.validation.issues.map(issue => ({ ...issue, message: "PRIVATE_MESSAGE", value: "PRIVATE_VALUE" })),
+      { path: "PRIVATE_PATH", keyword: "type" },
+    ],
+  } }] });
+  assert.deepEqual(view.tools[0].validation, outcome.trace.validation);
+  assert.doesNotMatch(JSON.stringify(view), /PRIVATE_/);
+});
+
+test("native model loop can correct invalid props using tool feedback then emit one UI block", async () => {
+  const tool = makeUiTool(catalog());
+  const blocks = [];
+  const host = nativeChat({ tools: [tool], respond: (request, index) => {
+    if (index === 1) return { content: "", toolCalls: [{ id: "bad", name: "present", arguments: { _type: "Fact", label: "Revenue" } }] };
+    if (index === 2) {
+      assert.match(JSON.stringify(request.messages), /required/);
+      assert.match(JSON.stringify(request.messages), /value/);
+      return { content: "", toolCalls: [{ id: "good", name: "present", arguments: fact }] };
+    }
+    return { content: final("Here is the result.") };
+  } });
+  const result = await host.runner.run({ question: "Show a fact", summary: "", recentHistory: [], runId: "run-repair" }, { onArtifact: artifact => blocks.push(artifact) });
+  assert.equal(host.requests.length, 3);
+  assert.equal(blocks.length, 1);
+  assert.deepEqual(result.result.uiBlocks[0].tree, fact);
+});
 
 test("catalog hash, component props and framework limits validate the complete tree", () => {
   const source = catalog();

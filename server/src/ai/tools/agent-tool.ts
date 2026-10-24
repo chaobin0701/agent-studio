@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { ToolValidationDiagnostics } from "./tool-validation";
 import { ToolContext } from "./tool-context";
 import { ToolResult } from "./tool-result";
 import type { ContextProjector } from "../context/context-contribution";
@@ -35,6 +36,8 @@ export interface AgentTool<TInput = unknown> {
   readonly name: string;
   readonly description: string;
   readonly inputSchema: z.ZodTypeAny;
+  /** Host-owned, value-free repair hints; no arbitrary validator messages. */
+  readonly inputDiagnostics?: (input: unknown) => ToolValidationDiagnostics;
   /** Provider-visible schema for managed tools; execution still validates inputSchema. */
   readonly parameters?: Record<string, unknown>;
   readonly runtimeLimits?: { maxRetries: number; timeoutMs: number };

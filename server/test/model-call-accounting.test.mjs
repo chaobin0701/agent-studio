@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { LlmService, ModelStreamProtocolError } from '../dist/chat/llm.service.js';
 import { withModelCallAccounting, modelInputReservation } from '../dist/chat/model-call-accounting.js';
 import { quotaExceeded } from '../dist/integrations/quota-error.js';
+import { safeTraceMetadata } from '../dist/observability/execution-tracer.js';
 
 const usage = { inputTokens: 10, outputTokens: 3, totalTokens: 13 };
 const response = content => ({ content, toolCalls: [], model: 'fixture', usage, finishReason: 'stop' });
@@ -90,4 +91,58 @@ test('planner stream rejects incomplete tool arguments before any caller can exe
     withModelCallAccounting({ reserve: async () => ({ settle: async () => {} }) }, () => llm.streamDetailed('system', 'question', 'fixture', 'planner')),
     error => error instanceof ModelStreamProtocolError && error.reason === 'invalid_tool_arguments',
   );
+});
+
+test('tool argument protocol logs contain classifications and counters, never model JSON or parse messages', async () => {
+  for (const [argumentsDelta, argumentKind] of [
+    ['{"secret":"PRIVATE_VALUE"', 'invalid_json'],
+    ['["PRIVATE_VALUE"]', 'non_object'],
+  ]) {
+    let calls = 0;
+    const logs = [], settlements = [];
+    const llm = new LlmService({ model: 'fixture', async *stream() {
+      calls++;
+      yield { type: 'tool_call_delta', index: 2, id: 'call-private', name: 'present', argumentsDelta };
+      yield { type: 'completed', usage, finishReason: 'tool_calls' };
+    } });
+    llm.logger.warn = message => logs.push(JSON.parse(message));
+    await assert.rejects(
+      withModelCallAccounting({ reserve: async () => ({ settle: async tokens => settlements.push(tokens) }) },
+        () => llm.streamDetailed('PRIVATE_SYSTEM', 'PRIVATE_QUESTION', 'fixture', 'planner')),
+      error => {
+        assert.equal(error.reason, 'invalid_tool_arguments');
+        assert.deepEqual(error.diagnostics, { toolCallIndex: 2, argumentChars: argumentsDelta.length, argumentKind });
+        assert.equal(error.attemptsTrail[0].retryable, false);
+        return true;
+      },
+    );
+    assert.equal(calls, 1);
+    assert.deepEqual(settlements, [usage]);
+    assert.equal(logs.length, 1);
+    assert.equal(logs[0].event, 'model_stream_failed');
+    assert.equal(logs[0].argumentKind, argumentKind);
+    assert.equal(logs[0].toolCallIndex, 2);
+    assert.equal(logs[0].argumentChars, argumentsDelta.length);
+    assert.equal(logs[0].finishReason, 'tool_calls');
+    assert.equal(logs[0].toolCallCount, 1);
+    assert.equal(logs[0].totalTokens, 13);
+    assert.doesNotMatch(JSON.stringify(logs), /PRIVATE_|call-private|secret|SyntaxError/);
+    assert.equal(safeTraceMetadata({ errorCode: 'invalid_tool_arguments' }).errorCode, 'invalid_tool_arguments');
+  }
+});
+
+test('provider length finish reason classifies incomplete tool JSON as truncation without repair or replay', async () => {
+  let calls = 0;
+  const llm = new LlmService({ model: 'fixture', async *stream() {
+    calls++;
+    yield { type: 'tool_call_delta', index: 0, id: 'call-a', name: 'present', argumentsDelta: '{"_type":"Table"' };
+    yield { type: 'completed', usage, finishReason: 'length' };
+  } });
+  const logs = [];
+  llm.logger.warn = message => logs.push(JSON.parse(message));
+  await assert.rejects(llm.streamDetailed('system', 'question', 'fixture', 'planner'),
+    error => error instanceof ModelStreamProtocolError && error.reason === 'output_truncated');
+  assert.equal(calls, 1);
+  assert.equal(logs[0].errorCode, 'output_truncated');
+  assert.equal(safeTraceMetadata({ errorCode: 'output_truncated' }).errorCode, 'output_truncated');
 });

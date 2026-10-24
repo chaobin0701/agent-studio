@@ -301,11 +301,31 @@ export class ConversationService {
        FROM conversation_messages WHERE conversation_id = $1 ORDER BY id ASC`,
       [id],
     );
-    const linked=(await this.database.query<{messageId:number;callId:string;runId:string;contextUsage?:import("./context-governor").ModelContextUsage}>("SELECT r.assistant_message_id::int AS \"messageId\",r.integration_call_id AS \"callId\",r.id AS \"runId\",c.response->'contextUsage' AS \"contextUsage\" FROM conversation_runs r LEFT JOIN integration_calls c ON c.id=r.integration_call_id WHERE r.conversation_id=$1 AND r.assistant_message_id IS NOT NULL AND r.integration_call_id IS NOT NULL",[id])).rows;
-    const cards=this.interactions ? await this.interactions.listMany(linked.map(row=>row.callId)) : new Map<string,PublicInteraction[]>();
-    const byMessage=new Map(linked.map(row=>[row.messageId,cards.get(row.callId)??[]]));
-    const usageByMessage=new Map(linked.map(row=>[row.messageId,row.contextUsage]));
-    return result.rows.map(row=>({...row,uiBlocks:uiBlocks(row.artifacts,linked.find(link=>link.messageId===row.id)?.runId ?? ""),...(this.interactions?{interactions:byMessage.get(row.id)??[]}:{}),...(usageByMessage.get(row.id)?{contextUsage:usageByMessage.get(row.id)}:{})}));
+    // UI identity belongs to the conversation run, even without an integration call.
+    const linked = (await this.database.query<{
+      messageId: number;
+      callId: string | null;
+      runId: string;
+      contextUsage?: import("./context-governor").ModelContextUsage;
+    }>(
+      `SELECT r.assistant_message_id::int AS "messageId", r.integration_call_id AS "callId",
+              r.id AS "runId", c.response->'contextUsage' AS "contextUsage"
+       FROM conversation_runs r LEFT JOIN integration_calls c ON c.id = r.integration_call_id
+       WHERE r.conversation_id = $1 AND r.assistant_message_id IS NOT NULL`,
+      [id],
+    )).rows;
+    const callIds = linked.flatMap(row => row.callId ? [row.callId] : []);
+    const cards = this.interactions ? await this.interactions.listMany(callIds) : new Map<string, PublicInteraction[]>();
+    const byMessage = new Map(linked.map(row => [row.messageId, row]));
+    return result.rows.map(row => {
+      const run = byMessage.get(row.id);
+      return {
+        ...row,
+        uiBlocks: uiBlocks(row.artifacts, run?.runId ?? ""),
+        ...(this.interactions ? { interactions: run?.callId ? cards.get(run.callId) ?? [] : [] } : {}),
+        ...(run?.contextUsage ? { contextUsage: run.contextUsage } : {}),
+      };
+    });
   }
 
   async context(ownerId: string, id: string) {

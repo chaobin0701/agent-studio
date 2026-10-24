@@ -1,4 +1,5 @@
-import Ajv from "ajv";
+import Ajv, { type ErrorObject } from "ajv";
+import type { ToolValidationDiagnostics, ToolValidationIssue } from "../ai/tools/tool-validation";
 import { z } from "zod";
 import { toolArgumentsHash } from "../ai/tools/tool-context";
 import type { AgentTool } from "../ai/tools/agent-tool";
@@ -35,7 +36,7 @@ export function compileUiCatalog(value: unknown) {
     }
   };
   inspect(catalog);
-  const ajv = new Ajv({ strict: false, allErrors: false, validateFormats: false });
+  const ajv = new Ajv({ strict: false, allErrors: true, validateFormats: false });
   const parameters = ajv.compile(catalog.parameters);
   if (catalog.parameters.type !== "object") throw new Error("present Schema 必须是 object");
   const validators = new Map(names.map(name => {
@@ -47,32 +48,85 @@ export function compileUiCatalog(value: unknown) {
       throw new Error("组件属性不能覆盖框架保留字段");
     return [name, ajv.compile(spec.props)] as const;
   }));
-  const validate = (tree: unknown): boolean => {
-    if (JSON.stringify(tree)?.length > 6000) return false;
-    let count = 0;
-    const visit = (node: unknown, depth: number): boolean => {
-      if (typeof node === "string") return node.length <= 500;
-      if (++count > 80 || depth > 8 || !node || typeof node !== "object" || Array.isArray(node)) return false;
-      const { _type, _key, children, ...props } = node as Record<string, unknown>;
-      if (typeof _type !== "string" || !Object.hasOwn(catalog.components, _type) ||
-          (_key !== undefined && !(typeof _key === "string" && _key.length <= 100) && !(typeof _key === "number" && Number.isFinite(_key)))) return false;
-      if (!validators.get(_type)!(props)) return false;
-      if (children === undefined) return true;
-      return catalog.components[_type]!.children && (Array.isArray(children)
-        ? children.length <= 40 && children.every(child => visit(child, depth + 1))
-        : visit(children, depth + 1));
-    };
-    return !!tree && typeof tree === "object" && !Array.isArray(tree) && visit(tree, 0) && Boolean(parameters(tree));
+  // Only published schema fields enter diagnostics, never arbitrary model keys.
+  const knownFields = new Set(["_type", "_key", "children"]);
+  const collectFields = (schema: unknown): void => {
+    if (!schema || typeof schema !== "object") return;
+    for (const [key, child] of Object.entries(schema)) {
+      if (key === "properties" && child && typeof child === "object")
+        Object.keys(child).forEach(field => knownFields.add(field));
+      collectFields(child);
+    }
   };
-  return { catalog, validate };
+  names.forEach(name => collectFields(catalog.components[name]!.props));
+  const safeField = (field: unknown) => typeof field === "string" && knownFields.has(field) && /^[A-Za-z_][A-Za-z0-9_]{0,63}$/.test(field) ? field : undefined;
+  const safePath = (path: string) => path.split("/").filter(Boolean).map(part => {
+    const decoded = part.replace(/~1/g, "/").replace(/~0/g, "~");
+    return `/${/^\d{1,4}$/.test(decoded) ? decoded : safeField(decoded) ?? "*"}`;
+  }).join("");
+  const diagnose = (tree: unknown): ToolValidationDiagnostics => {
+    const issues: ToolValidationIssue[] = [];
+    const add = (issue: ToolValidationIssue) => { if (issues.length < 12) issues.push(issue); };
+    const ajvIssues = (errors: ErrorObject[] | null | undefined, path: string, component?: string) => {
+      for (const error of errors ?? []) {
+        const field = safeField(error.params.missingProperty ?? error.params.additionalProperty);
+        add({ path: `${path}${safePath(error.instancePath)}`, component, keyword: error.keyword, ...(field ? { field } : {}) });
+      }
+    };
+    let count = 0;
+    // Keep the existing tree/limit walk. Ajv alone validates component props.
+    const visit = (node: unknown, depth: number, path: string): boolean => {
+      if (typeof node === "string") {
+        if (node.length > 500) add({ path, keyword: "maxLength" });
+        return node.length <= 500;
+      }
+      if (++count > 80 || depth > 8) { add({ path, keyword: count > 80 ? "node_limit" : "depth_limit" }); return false; }
+      if (!node || typeof node !== "object" || Array.isArray(node)) { add({ path, keyword: "type" }); return false; }
+      const { _type, _key, children, ...props } = node as Record<string, unknown>;
+      if (typeof _type !== "string" || !Object.hasOwn(catalog.components, _type)) { add({ path, field: "_type", keyword: "unknown_component" }); return false; }
+      if (_key !== undefined && !(typeof _key === "string" && _key.length <= 100) && !(typeof _key === "number" && Number.isFinite(_key))) {
+        add({ path, component: _type, field: "_key", keyword: "type" });
+        return false;
+      }
+      const validator = validators.get(_type)!;
+      if (!validator(props)) { ajvIssues(validator.errors, path, _type); return false; }
+      if (children === undefined) return true;
+      if (!catalog.components[_type]!.children) { add({ path, component: _type, field: "children", keyword: "children_not_allowed" }); return false; }
+      if (Array.isArray(children)) {
+        if (children.length > 40) { add({ path: `${path}/children`, component: _type, keyword: "maxItems" }); return false; }
+        return children.every((child, index) => visit(child, depth + 1, `${path}/children/${index}`));
+      }
+      return visit(children, depth + 1, `${path}/children`);
+    };
+    try {
+      if ((JSON.stringify(tree)?.length ?? 0) > 6000) add({ path: "", keyword: "size_limit" });
+      else if (!tree || typeof tree !== "object" || Array.isArray(tree)) add({ path: "", keyword: "type" });
+      else if (visit(tree, 0, "") && !parameters(tree)) ajvIssues(parameters.errors, "");
+    } catch { add({ path: "", keyword: "invalid_json_value" }); }
+    return { catalogVersion: catalog.version, issues };
+  };
+  const validate = (tree: unknown): boolean => diagnose(tree).issues.length === 0;
+  return { catalog, validate, diagnose };
+}
+
+/** Concise hints supplement assistant-ui's merged schema without copying it. */
+function componentGuidance(catalog: UiCatalog): string {
+  return Object.entries(catalog.components).map(([name, component]) => {
+    const fields = Object.keys(component.props.properties ?? {});
+    const required = new Set(component.props.required as string[] ?? []);
+    const optional = fields.filter(field => !required.has(field));
+    return `${name}: 必填 ${[...required].join(", ") || "无"}；可选 ${optional.join(", ") || "无"}；children ${component.children ? "允许" : "禁止"}。${component.description}`;
+  }).join("\n");
 }
 
 export function makeUiTool(value: unknown): AgentTool {
-  const { catalog, validate } = compileUiCatalog(value);
+  const { catalog, validate, diagnose } = compileUiCatalog(value);
+  const guidance = componentGuidance(catalog);
   return {
     name: "present",
-    description: "通过已注册组件呈现只读界面。使用目录指定的组件与属性，不包含操作或表单。",
+    description: `通过已注册组件呈现界面；交互能力以组件目录为准，用户提交由前端作为下一轮消息处理，不直接执行工具，也不授予审批权限。将所需组件组合成完整树，成功后无需重复呈现。只填写当前 _type 的属性，参数失败时根据字段路径修正。总量限制：6000 字符、80 节点、深度 8、每组最多 40 个子节点。\n${guidance}`,
     parameters: catalog.parameters,
+    inputDiagnostics: diagnose,
     inputSchema: z.unknown().superRefine((tree, ctx) => {
       if (!validate(tree)) ctx.addIssue({ code: "custom", message: "UI 树不符合已发布组件目录或超过限制" });
     }),

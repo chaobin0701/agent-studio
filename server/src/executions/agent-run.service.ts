@@ -336,7 +336,7 @@ export class AgentRunService {
             phase = "accounting";
             const completed = (await this.access.finish(admission.callId, response))!;
             await this.interactions?.complete(runId).catch(()=>this.logger.warn("Could not purge completed native checkpoint"));
-            return completed;
+            return this.publicResult(completed);
           } catch (error) {
             if(error instanceof InteractionSuspension || error instanceof InteractionWaiting) throw error;
             annotateExecution({

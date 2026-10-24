@@ -1,0 +1,279 @@
+[
+  {
+    "_type": "Card",
+    "title": "摘要卡片",
+    "description": "把相关内容组织在一起。",
+    "children": [
+      "卡片内也支持嵌套其他组件。"
+    ]
+  },
+  {
+    "_type": "Row",
+    "children": [
+      {
+        "_type": "Fact",
+        "label": "横向布局 · 左",
+        "value": 12
+      },
+      {
+        "_type": "Fact",
+        "label": "横向布局 · 右",
+        "value": 24
+      }
+    ]
+  },
+  {
+    "_type": "Fact",
+    "label": "示例完成率",
+    "value": "86%",
+    "detail": "仅为组件演示数据"
+  },
+  {
+    "_type": "Chart",
+    "title": "示例趋势",
+    "chartType": "line",
+    "points": [
+      {
+        "label": "周一",
+        "value": 12
+      },
+      {
+        "label": "周二",
+        "value": 20
+      },
+      {
+        "label": "周三",
+        "value": 16
+      }
+    ]
+  },
+  {
+    "_type": "Table",
+    "caption": "方案对比示例",
+    "columns": [
+      "方案",
+      "特点"
+    ],
+    "rows": [
+      [
+        "方案 A",
+        "轻量"
+      ],
+      [
+        "方案 B",
+        "全面"
+      ]
+    ]
+  },
+  {
+    "_type": "Markdown",
+    "content": "**重点说明**\n\n- 支持段落与列表\n- 支持 `代码` 与安全链接\n\n[查看平台介绍](/platform)"
+  },
+  {
+    "_type": "Alert",
+    "title": "这是一条提示",
+    "description": "此页使用演示数据，提交只会记录在下方，不会调用 Agent。",
+    "tone": "info"
+  },
+  {
+    "_type": "Image",
+    "src": "/images/studio/architecture-ai.png",
+    "alt": "Agent Studio 架构示意",
+    "caption": "平台已有素材"
+  },
+  {
+    "_type": "Gallery",
+    "title": "界面图集",
+    "images": [
+      {
+        "src": "/images/studio/agents.png",
+        "alt": "Agent 管理界面"
+      },
+      {
+        "src": "/images/studio/knowledge.png",
+        "alt": "知识管理界面"
+      }
+    ]
+  },
+  {
+    "_type": "Badge",
+    "label": "已完成",
+    "tone": "success"
+  },
+  {
+    "_type": "Tag",
+    "label": "参考资料",
+    "tone": "neutral"
+  },
+  {
+    "_type": "KeyValue",
+    "title": "配置摘要",
+    "entries": [
+      {
+        "label": "语言",
+        "value": "中文"
+      },
+      {
+        "label": "示例数量",
+        "value": 21
+      }
+    ]
+  },
+  {
+    "_type": "Steps",
+    "title": "操作步骤",
+    "steps": [
+      {
+        "title": "收集信息",
+        "state": "completed"
+      },
+      {
+        "title": "确认需求",
+        "state": "current",
+        "description": "核对关键内容。"
+      },
+      {
+        "title": "生成建议",
+        "state": "pending"
+      }
+    ]
+  },
+  {
+    "_type": "Timeline",
+    "title": "事件记录",
+    "events": [
+      {
+        "title": "收集需求",
+        "time": "09:00",
+        "description": "演示时间"
+      },
+      {
+        "title": "完成评估",
+        "time": "10:00"
+      }
+    ]
+  },
+  {
+    "_type": "Accordion",
+    "title": "常见问题",
+    "sections": [
+      {
+        "title": "这些组件可以组合吗？",
+        "content": "可以，使用 **Card** 和 **Row** 组织内容。"
+      },
+      {
+        "title": "提交后发生什么？",
+        "content": "作为下一轮用户消息发送，真实操作仍由既有工具权限控制。"
+      }
+    ]
+  },
+  {
+    "_type": "Tabs",
+    "title": "不同视角",
+    "tabs": [
+      {
+        "title": "概览",
+        "content": "这里展示**整体信息**。"
+      },
+      {
+        "title": "详情",
+        "content": "这里展示详细说明与补充内容。"
+      }
+    ]
+  },
+  {
+    "_type": "List",
+    "title": "参考入口",
+    "items": [
+      {
+        "title": "平台介绍",
+        "description": "了解平台能力。",
+        "url": "/platform"
+      },
+      {
+        "title": "纯文本条目",
+        "description": "条目不必包含链接。"
+      }
+    ]
+  },
+  {
+    "_type": "Choice",
+    "id": "format",
+    "title": "你希望如何查看？",
+    "options": [
+      {
+        "value": "summary",
+        "label": "简要摘要"
+      },
+      {
+        "value": "details",
+        "label": "详细说明"
+      }
+    ]
+  },
+  {
+    "_type": "ActionButton",
+    "id": "continue",
+    "label": "继续了解",
+    "action": {
+      "type": "send_message",
+      "message": "请继续介绍相关内容"
+    }
+  },
+  {
+    "_type": "Form",
+    "id": "preferences",
+    "title": "补充偏好",
+    "description": "仅填写演示信息。",
+    "fields": [
+      {
+        "name": "topic",
+        "label": "主题",
+        "type": "text",
+        "required": true
+      },
+      {
+        "name": "detail",
+        "label": "补充说明",
+        "type": "textarea"
+      },
+      {
+        "name": "count",
+        "label": "数量",
+        "type": "number"
+      },
+      {
+        "name": "format",
+        "label": "格式",
+        "type": "select",
+        "options": [
+          {
+            "value": "short",
+            "label": "简洁"
+          },
+          {
+            "value": "full",
+            "label": "完整"
+          }
+        ]
+      },
+      {
+        "name": "date",
+        "label": "计划日期",
+        "type": "date"
+      },
+      {
+        "name": "examples",
+        "label": "包含示例",
+        "type": "checkbox"
+      }
+    ]
+  },
+  {
+    "_type": "Confirmation",
+    "id": "confirm",
+    "title": "确认需求",
+    "description": "是否按刚才的偏好继续生成建议？这只确认你的意图。",
+    "message": "按我的偏好生成建议"
+  }
+]

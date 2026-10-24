@@ -27,9 +27,10 @@ export function makeManagedTool(
     },
     runtimeLimits: { maxRetries: spec.maxRetries, timeoutMs: spec.timeoutMs },
     name: v.key,
-    description: spec.description,
+    description: spec.type === "ui" ? `${spec.description}\n${base!.description}` : spec.description,
     inputSchema: base && spec.type !== "ui" ? z.intersection(base.inputSchema, schema) : schema,
     parameters: spec.parameters,
+    inputDiagnostics: base?.inputDiagnostics,
     capabilities: base?.capabilities,
     contributeContext: base?.contributeContext,
     resultCacheKey:

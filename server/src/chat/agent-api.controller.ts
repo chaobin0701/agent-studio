@@ -127,7 +127,7 @@ export class AgentApiController {
   async history(@Req() request: IntegrationRequest, @Param('id', ParseUUIDPipe) id: string, @Query('userId') userId?: string) {
     this.access.assertScope(request.integration, 'conversations:read');
     const messages = await this.conversations.messages(await this.access.platformOwner(request.integration, userId), id);
-    return messages.map(({ id: messageId, role, content, refused, citations, structured, artifacts, progressEvents, context, createdAt, contextUsage, interactions }) => ({
+    return messages.map(({ id: messageId, role, content, refused, citations, structured, artifacts, uiBlocks, progressEvents, context, createdAt, contextUsage, interactions }) => ({
       id: messageId,
       role,
       content,
@@ -135,6 +135,7 @@ export class AgentApiController {
       citations,
       ...(structured !== undefined && structured !== null ? { structured } : {}),
       artifacts,
+      uiBlocks,
       progressEvents,
       context,
       createdAt,

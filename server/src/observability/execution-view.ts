@@ -1,3 +1,5 @@
+import { safeToolValidation } from "../ai/tools/tool-validation";
+
 /** Ordinary execution views are an allowlist, not a redacted dump of graph state.
  * Prompt bodies, native arguments/results, raw model text and cloud project IDs
  * never pass this boundary. Debug inspection remains a separate audited API. */
@@ -192,7 +194,9 @@ export function executionContextView(
       ]),
       attemptsTrail: attempts(object(item).attemptsTrail),
     })),
-    tools: array(context.toolCalls).map((item) => ({
+    tools: array(context.toolCalls).map((item) => {
+      const validation = safeToolValidation(object(item).validation);
+      return {
       ...scalarFields(item, [
         "name",
         "ok",
@@ -205,6 +209,7 @@ export function executionContextView(
         "deferred",
       ]),
       attemptsTrail: attempts(object(item).attemptsTrail),
+      ...(validation ? { validation } : {}),
       retrieval: {
         ...scalarFields(object(item).retrieval, [
           "embeddingPlanVersionId",
@@ -224,7 +229,8 @@ export function executionContextView(
           ...scalarFields(object(kb).config, ["retrievalMode"]),
         })),
       },
-    })),
+      };
+    }),
     tasks:
       depth < 3
         ? array(context.specialistTasks, 10).map((item) => ({

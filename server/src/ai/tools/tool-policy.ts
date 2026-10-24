@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { safeToolValidation, type ToolValidationDiagnostics } from "./tool-validation";
 import { AgentTool } from "./agent-tool";
 import { ToolResult } from "./tool-result";
 import { Injectable, Optional } from "@nestjs/common";
@@ -26,7 +27,7 @@ export type ToolPolicyFailure =
 
 export type ToolInputValidation =
   | { ok: true; input: unknown }
-  | { ok: false; errorCode: ToolPolicyFailure };
+  | { ok: false; errorCode: ToolPolicyFailure; validation?: ToolValidationDiagnostics };
 
 @Injectable()
 export class ToolPolicy {
@@ -96,9 +97,10 @@ export class ToolPolicy {
     args: Record<string, unknown>,
   ): ToolInputValidation {
     const parsed = tool.inputSchema.safeParse(args);
-    return parsed.success
-      ? { ok: true, input: parsed.data }
-      : { ok: false, errorCode: "invalid_arguments" };
+    if (parsed.success) return { ok: true, input: parsed.data };
+    let validation: ToolValidationDiagnostics | undefined;
+    try { validation = safeToolValidation(tool.inputDiagnostics?.(args)); } catch { /* Diagnostics never replace validation failure. */ }
+    return { ok: false, errorCode: "invalid_arguments", ...(validation ? { validation } : {}) };
   }
 
   normalizeResult(

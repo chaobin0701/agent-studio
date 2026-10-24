@@ -1,5 +1,6 @@
 import { runtimeScope } from "../../agent-management/runtime-scope";
-import { Injectable } from "@nestjs/common";
+import { Injectable, Logger } from "@nestjs/common";
+import { safeToolValidation, type ToolValidationDiagnostics } from "./tool-validation";
 import { z } from "zod";
 import { AgentTool } from "./agent-tool";
 import { ToolContext } from "./tool-context";
@@ -89,6 +90,7 @@ export type ToolExecutionTrace = {
   reused?: boolean;
   deferred?: boolean;
   retrieval?: z.infer<typeof retrievalTraceSchema>;
+  validation?: ToolValidationDiagnostics;
 };
 
 export type ToolExecutionOutcome = {
@@ -175,6 +177,7 @@ export function isRetryableToolResult(result: ToolResult): boolean {
 
 @Injectable()
 export class ToolExecutionService {
+  private readonly logger = new Logger(ToolExecutionService.name);
   constructor(
     private readonly registry: ToolRegistry,
     private readonly policy: ToolPolicy,
@@ -368,7 +371,7 @@ export class ToolExecutionService {
       return this.failure("unknown_tool", trace);
     }
     const validation = this.policy.validateInput(tool, args);
-    if (!validation.ok) return this.failure(validation.errorCode, trace);
+    if (!validation.ok) return this.validationFailure(tool, validation.validation, trace);
     return this.failure("tool_requires_replanning", {
       ...trace,
       deferred: true,
@@ -445,7 +448,7 @@ export class ToolExecutionService {
     }
 
     const validation = this.policy.validateInput(tool, args);
-    if (!validation.ok) return this.failure(validation.errorCode, baseTrace());
+    if (!validation.ok) return this.validationFailure(tool, validation.validation, baseTrace(), context);
 
     const isIdempotent = tool.planning?.isIdempotent !== false;
     const maxRetries = isIdempotent
@@ -747,6 +750,29 @@ export class ToolExecutionService {
       if (timer) clearTimeout(timer);
       if (onAbort) signal?.removeEventListener("abort", onAbort);
     }
+  }
+
+  private validationFailure(
+    tool: AgentTool,
+    diagnostics: ToolValidationDiagnostics | undefined,
+    trace: ToolExecutionTrace,
+    context?: ToolContext,
+  ): ToolExecutionOutcome {
+    const validation = safeToolValidation(diagnostics);
+    const safeId = (value: unknown) => typeof value === "string" && /^[a-zA-Z0-9_-]{1,80}$/.test(value) ? value : undefined;
+    this.logger.warn(JSON.stringify({
+      event: "tool_input_validation_failed",
+      tool: safeId(tool.name), toolVersionId: tool.execution?.toolVersionId,
+      traceId: safeId(context?.traceId), sessionId: safeId(context?.sessionId),
+      errorCode: "invalid_arguments", durationMs: trace.durationMs,
+      ...(validation ? { validation } : {}),
+    }));
+    const outcome = this.failure("invalid_arguments", { ...trace, ...(validation ? { validation } : {}) });
+    if (!validation) return outcome;
+    return { ...outcome, result: {
+      ...outcome.result,
+      content: `参数校验失败。根据以下组件、JSON Pointer 路径和字段约束修正后重试；空路径表示根节点，required 表示缺少必填字段，additionalProperties 表示该组件不允许该属性。不要重复提交相同参数。${JSON.stringify(validation)}`,
+    } };
   }
 
   private failure(

@@ -92,6 +92,7 @@ test("administrative preview uses the formal Deep Agents Run core, fixed snapsho
   const prepared = await f.preview.prepare(1, f.body);
   const result = await f.runs.execute(prepared);
   assert.equal(result.answer, "Generic task answer");
+  assert.deepEqual(result.uiBlocks, []);
   assert.equal(result.usage.totalTokens, 15);
   assert.equal(f.native.requests.length, 1);
   assert.equal(f.settled.length, 1);

@@ -103,7 +103,14 @@ export type LlmStreamCallbacks = {
 };
 
 export class ModelStreamProtocolError extends Error {
-  constructor(readonly reason: string) {
+  constructor(
+    readonly reason: string,
+    readonly diagnostics?: {
+      toolCallIndex: number;
+      argumentChars: number;
+      argumentKind: "invalid_json" | "non_object";
+    },
+  ) {
     super(`Model stream protocol error: ${reason}`);
     this.name = "ModelStreamProtocolError";
   }
@@ -746,10 +753,13 @@ export class LlmService {
             }
             if (!completed || (managed && !finishReason))
               throw new ModelStreamProtocolError("missing_completion_event");
+            // Check the provider's truncation signal before parsing potentially
+            // incomplete tool JSON. No repair or extra paid request is made.
+            if (finishReason === "length")
+              throw new ModelStreamProtocolError("output_truncated");
             const toolCalls: LlmToolCall[] = [];
-            for (const call of [...calls.entries()]
-              .sort(([left], [right]) => left - right)
-              .map(([, value]) => value)) {
+            for (const [index, call] of [...calls.entries()]
+              .sort(([left], [right]) => left - right)) {
               if (
                 !call.id ||
                 !call.name ||
@@ -760,14 +770,18 @@ export class LlmService {
               try {
                 parsed = JSON.parse(call.arguments);
               } catch {
-                throw new ModelStreamProtocolError("invalid_tool_arguments");
+                throw new ModelStreamProtocolError("invalid_tool_arguments", {
+                  toolCallIndex: index, argumentChars: call.arguments.length, argumentKind: "invalid_json",
+                });
               }
               if (
                 !parsed ||
                 typeof parsed !== "object" ||
                 Array.isArray(parsed)
               )
-                throw new ModelStreamProtocolError("invalid_tool_arguments");
+                throw new ModelStreamProtocolError("invalid_tool_arguments", {
+                  toolCallIndex: index, argumentChars: call.arguments.length, argumentKind: "non_object",
+                });
               toolCalls.push({
                 id: call.id,
                 name: call.name,
@@ -776,12 +790,6 @@ export class LlmService {
             }
             if (!content && toolCalls.length === 0)
               throw new ModelStreamProtocolError("empty_response");
-            // Removing application-level answer length caps does not make a model
-            // truncation a complete answer. A provider finish reason of `length`
-            // means the configured max output token budget was reached; callers
-            // must keep the partial text as interrupted and never emit completed.
-            if (finishReason === "length")
-              throw new ModelStreamProtocolError("output_truncated");
             if (
               toolCalls.length &&
               finishReason !== null &&
@@ -893,7 +901,15 @@ export class LlmService {
           timestamp: new Date().toISOString(),
         });
         this.logger.warn(
-          `Answer stream failed model=${request.model} purpose=${purpose} attempt=${attempt}/${maxAttempts} emitted=${emitted} reason=${classified.errorCode}`,
+          JSON.stringify({
+            event: "model_stream_failed", model: request.model, purpose,
+            attempt, maxAttempts, deploymentId: candidate.deploymentId, versionId: candidate.versionId,
+            emitted, completed, finishReason, toolCallCount: calls.size,
+            errorCode: classified.errorCode, errorKind: classified.errorKind,
+            retryable: classified.retryable, durationMs: Date.now() - attemptStarted,
+            ...usage,
+            ...(error instanceof ModelStreamProtocolError ? error.diagnostics : {}),
+          }),
         );
         if (!canRetry) {
           const retryExhausted = classified.retryable && attempt >= maxAttempts;

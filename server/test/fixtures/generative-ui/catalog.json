@@ -1,0 +1,2110 @@
+{
+  "adapter": "assistant-ui",
+  "version": "ae1cece2a2752353a772280ab5bfc547df4ed0eda5a59aa8ec14f97542ad9fb2",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "_type": {
+        "type": "string",
+        "enum": [
+          "Card",
+          "Row",
+          "Fact",
+          "Chart",
+          "Table",
+          "Markdown",
+          "Alert",
+          "Image",
+          "Gallery",
+          "Badge",
+          "Tag",
+          "KeyValue",
+          "Steps",
+          "Timeline",
+          "Accordion",
+          "Tabs",
+          "List",
+          "Choice",
+          "ActionButton",
+          "Form",
+          "Confirmation"
+        ],
+        "description": "The component to render. \"Card\": 摘要卡片，可包含标题、说明和子组件。; \"Row\": 横向排列子组件，小屏幕自动换行。; \"Fact\": 单个指标：名称、值和可选说明。; \"Chart\": 展示柱状图或折线图；数据来自查询结果或用户明确提供的示例，不得编造。; \"Table\": 只读数据表。每行单元格按 columns 顺序提供。; \"Markdown\": 段落、列表、代码和链接，不支持原始 HTML。; \"Alert\": 提示、成功、警告或错误信息。; \"Image\": 已知来源图片，必须提供替代文本，不得编造 URL。; \"Gallery\": 已知来源的多图集合。; \"Badge\": 简短的状态标记。; \"Tag\": 简短分类标签。; \"KeyValue\": 属性摘要，每项为 label/value，可用文字或数字。; \"Steps\": 只读操作步骤；state 是 pending/current/completed。; \"Timeline\": 按顺序展示事件、时间和说明。; \"Accordion\": 折叠长说明，sections 中的 content 支持 Markdown。; \"Tabs\": 切换内容视角；tabs 中的 content 支持 Markdown。; \"List\": 搜索结果、推荐项或文档列表，可附安全链接。; \"Choice\": 单选或多选后发送下一轮消息。id 在整棵树内必须唯一，options 的 value 不重复。; \"ActionButton\": 仅支持 send_message 或 open_url；不直接执行工具。id 在树内唯一。; \"Form\": 收集非敏感信息并作为下一轮消息提交。id 唯一，fields 的 name 唯一；select 必须提供 options，其他字段不要提供 options。不收集密码或凭证。; \"Confirmation\": 确认或取消一段用户意图，结果发送为下一轮消息；不是工具审批，不能替代平台授权。id 在树内唯一。"
+      },
+      "_key": {
+        "description": "Stable identity for this UI node. Use it for list items that may reorder.",
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "number"
+          }
+        ]
+      },
+      "title": {
+        "type": "string",
+        "maxLength": 500
+      },
+      "description": {
+        "type": "string",
+        "maxLength": 500
+      },
+      "label": {
+        "type": "string",
+        "maxLength": 500
+      },
+      "value": {
+        "anyOf": [
+          {
+            "type": "string",
+            "maxLength": 500
+          },
+          {
+            "type": "number"
+          }
+        ]
+      },
+      "detail": {
+        "type": "string",
+        "maxLength": 500
+      },
+      "chartType": {
+        "type": "string",
+        "enum": [
+          "bar",
+          "line"
+        ]
+      },
+      "points": {
+        "minItems": 1,
+        "maxItems": 30,
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "label": {
+              "type": "string",
+              "maxLength": 500
+            },
+            "value": {
+              "type": "number",
+              "minimum": -1000000000000,
+              "maximum": 1000000000000
+            }
+          },
+          "required": [
+            "label",
+            "value"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "unit": {
+        "type": "string",
+        "maxLength": 30
+      },
+      "caption": {
+        "type": "string",
+        "maxLength": 500
+      },
+      "columns": {
+        "minItems": 1,
+        "maxItems": 8,
+        "type": "array",
+        "items": {
+          "type": "string",
+          "maxLength": 100
+        }
+      },
+      "rows": {
+        "maxItems": 30,
+        "type": "array",
+        "items": {
+          "maxItems": 8,
+          "type": "array",
+          "items": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 500
+              },
+              {
+                "type": "number"
+              }
+            ]
+          }
+        }
+      },
+      "content": {
+        "type": "string",
+        "maxLength": 4000
+      },
+      "tone": {
+        "type": "string",
+        "enum": [
+          "neutral",
+          "info",
+          "success",
+          "warning",
+          "danger"
+        ]
+      },
+      "src": {
+        "type": "string",
+        "maxLength": 2000,
+        "pattern": "^(?:https:\\/\\/[a-zA-Z0-9.-]+(?::[0-9]{1,5})?(?:[/?#][^\\s\\\\]*)?|\\/(?!\\/)[^\\s\\\\]*)$"
+      },
+      "alt": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 500
+      },
+      "sourceUrl": {
+        "type": "string",
+        "maxLength": 2000,
+        "pattern": "^(?:https:\\/\\/[a-zA-Z0-9.-]+(?::[0-9]{1,5})?(?:[/?#][^\\s\\\\]*)?|\\/(?!\\/)[^\\s\\\\]*)$"
+      },
+      "images": {
+        "minItems": 1,
+        "maxItems": 8,
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "src": {
+              "type": "string",
+              "maxLength": 2000,
+              "pattern": "^(?:https:\\/\\/[a-zA-Z0-9.-]+(?::[0-9]{1,5})?(?:[/?#][^\\s\\\\]*)?|\\/(?!\\/)[^\\s\\\\]*)$"
+            },
+            "alt": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 500
+            },
+            "caption": {
+              "type": "string",
+              "maxLength": 500
+            },
+            "sourceUrl": {
+              "type": "string",
+              "maxLength": 2000,
+              "pattern": "^(?:https:\\/\\/[a-zA-Z0-9.-]+(?::[0-9]{1,5})?(?:[/?#][^\\s\\\\]*)?|\\/(?!\\/)[^\\s\\\\]*)$"
+            }
+          },
+          "required": [
+            "src",
+            "alt"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "entries": {
+        "minItems": 1,
+        "maxItems": 20,
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "label": {
+              "type": "string",
+              "maxLength": 500
+            },
+            "value": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 500
+                },
+                {
+                  "type": "number"
+                }
+              ]
+            }
+          },
+          "required": [
+            "label",
+            "value"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "steps": {
+        "minItems": 1,
+        "maxItems": 12,
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "title": {
+              "type": "string",
+              "maxLength": 500
+            },
+            "description": {
+              "type": "string",
+              "maxLength": 500
+            },
+            "state": {
+              "type": "string",
+              "enum": [
+                "pending",
+                "current",
+                "completed"
+              ]
+            }
+          },
+          "required": [
+            "title"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "events": {
+        "minItems": 1,
+        "maxItems": 20,
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "title": {
+              "type": "string",
+              "maxLength": 500
+            },
+            "time": {
+              "type": "string",
+              "maxLength": 500
+            },
+            "description": {
+              "type": "string",
+              "maxLength": 500
+            }
+          },
+          "required": [
+            "title"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "sections": {
+        "minItems": 1,
+        "maxItems": 12,
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "title": {
+              "type": "string",
+              "maxLength": 500
+            },
+            "content": {
+              "type": "string",
+              "maxLength": 3000
+            }
+          },
+          "required": [
+            "title",
+            "content"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "tabs": {
+        "minItems": 1,
+        "maxItems": 8,
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "title": {
+              "type": "string",
+              "maxLength": 500
+            },
+            "content": {
+              "type": "string",
+              "maxLength": 3000
+            }
+          },
+          "required": [
+            "title",
+            "content"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "items": {
+        "minItems": 1,
+        "maxItems": 20,
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "title": {
+              "type": "string",
+              "maxLength": 500
+            },
+            "description": {
+              "type": "string",
+              "maxLength": 500
+            },
+            "url": {
+              "type": "string",
+              "maxLength": 2000,
+              "pattern": "^(?:https:\\/\\/[a-zA-Z0-9.-]+(?::[0-9]{1,5})?(?:[/?#][^\\s\\\\]*)?|\\/(?!\\/)[^\\s\\\\]*)$"
+            }
+          },
+          "required": [
+            "title"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "id": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 64,
+        "pattern": "^[a-zA-Z][a-zA-Z0-9_-]*$"
+      },
+      "multiple": {
+        "type": "boolean"
+      },
+      "options": {
+        "minItems": 1,
+        "maxItems": 12,
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "value": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "pattern": "^[a-zA-Z][a-zA-Z0-9_-]*$"
+            },
+            "label": {
+              "type": "string",
+              "maxLength": 500
+            }
+          },
+          "required": [
+            "value",
+            "label"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "submitLabel": {
+        "type": "string",
+        "maxLength": 500
+      },
+      "action": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "const": "send_message"
+              },
+              "message": {
+                "type": "string",
+                "minLength": 2,
+                "maxLength": 1200
+              }
+            },
+            "required": [
+              "type",
+              "message"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "const": "open_url"
+              },
+              "url": {
+                "type": "string",
+                "maxLength": 2000,
+                "pattern": "^(?:https:\\/\\/[a-zA-Z0-9.-]+(?::[0-9]{1,5})?(?:[/?#][^\\s\\\\]*)?|\\/(?!\\/)[^\\s\\\\]*)$"
+              }
+            },
+            "required": [
+              "type",
+              "url"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      },
+      "fields": {
+        "minItems": 1,
+        "maxItems": 10,
+        "type": "array",
+        "items": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 64,
+                  "pattern": "^[a-zA-Z][a-zA-Z0-9_-]*$"
+                },
+                "label": {
+                  "type": "string",
+                  "maxLength": 500
+                },
+                "required": {
+                  "type": "boolean"
+                },
+                "placeholder": {
+                  "type": "string",
+                  "maxLength": 500
+                },
+                "type": {
+                  "type": "string",
+                  "const": "select"
+                },
+                "options": {
+                  "minItems": 1,
+                  "maxItems": 12,
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "value": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 64,
+                        "pattern": "^[a-zA-Z][a-zA-Z0-9_-]*$"
+                      },
+                      "label": {
+                        "type": "string",
+                        "maxLength": 500
+                      }
+                    },
+                    "required": [
+                      "value",
+                      "label"
+                    ],
+                    "additionalProperties": false
+                  }
+                }
+              },
+              "required": [
+                "name",
+                "label",
+                "type",
+                "options"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 64,
+                  "pattern": "^[a-zA-Z][a-zA-Z0-9_-]*$"
+                },
+                "label": {
+                  "type": "string",
+                  "maxLength": 500
+                },
+                "required": {
+                  "type": "boolean"
+                },
+                "placeholder": {
+                  "type": "string",
+                  "maxLength": 500
+                },
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "text",
+                    "textarea",
+                    "number",
+                    "date",
+                    "checkbox"
+                  ]
+                },
+                "options": {
+                  "not": {}
+                }
+              },
+              "required": [
+                "name",
+                "label",
+                "type"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        }
+      },
+      "message": {
+        "type": "string",
+        "minLength": 2,
+        "maxLength": 1200
+      },
+      "confirmLabel": {
+        "type": "string",
+        "maxLength": 500
+      },
+      "cancelLabel": {
+        "type": "string",
+        "maxLength": 500
+      },
+      "children": {
+        "$ref": "#/$defs/children"
+      }
+    },
+    "required": [
+      "_type"
+    ],
+    "$defs": {
+      "node": {
+        "type": "object",
+        "properties": {
+          "_type": {
+            "type": "string",
+            "enum": [
+              "Card",
+              "Row",
+              "Fact",
+              "Chart",
+              "Table",
+              "Markdown",
+              "Alert",
+              "Image",
+              "Gallery",
+              "Badge",
+              "Tag",
+              "KeyValue",
+              "Steps",
+              "Timeline",
+              "Accordion",
+              "Tabs",
+              "List",
+              "Choice",
+              "ActionButton",
+              "Form",
+              "Confirmation"
+            ],
+            "description": "The component to render. \"Card\": 摘要卡片，可包含标题、说明和子组件。; \"Row\": 横向排列子组件，小屏幕自动换行。; \"Fact\": 单个指标：名称、值和可选说明。; \"Chart\": 展示柱状图或折线图；数据来自查询结果或用户明确提供的示例，不得编造。; \"Table\": 只读数据表。每行单元格按 columns 顺序提供。; \"Markdown\": 段落、列表、代码和链接，不支持原始 HTML。; \"Alert\": 提示、成功、警告或错误信息。; \"Image\": 已知来源图片，必须提供替代文本，不得编造 URL。; \"Gallery\": 已知来源的多图集合。; \"Badge\": 简短的状态标记。; \"Tag\": 简短分类标签。; \"KeyValue\": 属性摘要，每项为 label/value，可用文字或数字。; \"Steps\": 只读操作步骤；state 是 pending/current/completed。; \"Timeline\": 按顺序展示事件、时间和说明。; \"Accordion\": 折叠长说明，sections 中的 content 支持 Markdown。; \"Tabs\": 切换内容视角；tabs 中的 content 支持 Markdown。; \"List\": 搜索结果、推荐项或文档列表，可附安全链接。; \"Choice\": 单选或多选后发送下一轮消息。id 在整棵树内必须唯一，options 的 value 不重复。; \"ActionButton\": 仅支持 send_message 或 open_url；不直接执行工具。id 在树内唯一。; \"Form\": 收集非敏感信息并作为下一轮消息提交。id 唯一，fields 的 name 唯一；select 必须提供 options，其他字段不要提供 options。不收集密码或凭证。; \"Confirmation\": 确认或取消一段用户意图，结果发送为下一轮消息；不是工具审批，不能替代平台授权。id 在树内唯一。"
+          },
+          "_key": {
+            "description": "Stable identity for this UI node. Use it for list items that may reorder.",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "number"
+              }
+            ]
+          },
+          "title": {
+            "type": "string",
+            "maxLength": 500
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 500
+          },
+          "label": {
+            "type": "string",
+            "maxLength": 500
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 500
+              },
+              {
+                "type": "number"
+              }
+            ]
+          },
+          "detail": {
+            "type": "string",
+            "maxLength": 500
+          },
+          "chartType": {
+            "type": "string",
+            "enum": [
+              "bar",
+              "line"
+            ]
+          },
+          "points": {
+            "minItems": 1,
+            "maxItems": 30,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "label": {
+                  "type": "string",
+                  "maxLength": 500
+                },
+                "value": {
+                  "type": "number",
+                  "minimum": -1000000000000,
+                  "maximum": 1000000000000
+                }
+              },
+              "required": [
+                "label",
+                "value"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "unit": {
+            "type": "string",
+            "maxLength": 30
+          },
+          "caption": {
+            "type": "string",
+            "maxLength": 500
+          },
+          "columns": {
+            "minItems": 1,
+            "maxItems": 8,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 100
+            }
+          },
+          "rows": {
+            "maxItems": 30,
+            "type": "array",
+            "items": {
+              "maxItems": 8,
+              "type": "array",
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "maxLength": 500
+                  },
+                  {
+                    "type": "number"
+                  }
+                ]
+              }
+            }
+          },
+          "content": {
+            "type": "string",
+            "maxLength": 4000
+          },
+          "tone": {
+            "type": "string",
+            "enum": [
+              "neutral",
+              "info",
+              "success",
+              "warning",
+              "danger"
+            ]
+          },
+          "src": {
+            "type": "string",
+            "maxLength": 2000,
+            "pattern": "^(?:https:\\/\\/[a-zA-Z0-9.-]+(?::[0-9]{1,5})?(?:[/?#][^\\s\\\\]*)?|\\/(?!\\/)[^\\s\\\\]*)$"
+          },
+          "alt": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "sourceUrl": {
+            "type": "string",
+            "maxLength": 2000,
+            "pattern": "^(?:https:\\/\\/[a-zA-Z0-9.-]+(?::[0-9]{1,5})?(?:[/?#][^\\s\\\\]*)?|\\/(?!\\/)[^\\s\\\\]*)$"
+          },
+          "images": {
+            "minItems": 1,
+            "maxItems": 8,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "src": {
+                  "type": "string",
+                  "maxLength": 2000,
+                  "pattern": "^(?:https:\\/\\/[a-zA-Z0-9.-]+(?::[0-9]{1,5})?(?:[/?#][^\\s\\\\]*)?|\\/(?!\\/)[^\\s\\\\]*)$"
+                },
+                "alt": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 500
+                },
+                "caption": {
+                  "type": "string",
+                  "maxLength": 500
+                },
+                "sourceUrl": {
+                  "type": "string",
+                  "maxLength": 2000,
+                  "pattern": "^(?:https:\\/\\/[a-zA-Z0-9.-]+(?::[0-9]{1,5})?(?:[/?#][^\\s\\\\]*)?|\\/(?!\\/)[^\\s\\\\]*)$"
+                }
+              },
+              "required": [
+                "src",
+                "alt"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "entries": {
+            "minItems": 1,
+            "maxItems": 20,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "label": {
+                  "type": "string",
+                  "maxLength": 500
+                },
+                "value": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "maxLength": 500
+                    },
+                    {
+                      "type": "number"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "label",
+                "value"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "steps": {
+            "minItems": 1,
+            "maxItems": 12,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "title": {
+                  "type": "string",
+                  "maxLength": 500
+                },
+                "description": {
+                  "type": "string",
+                  "maxLength": 500
+                },
+                "state": {
+                  "type": "string",
+                  "enum": [
+                    "pending",
+                    "current",
+                    "completed"
+                  ]
+                }
+              },
+              "required": [
+                "title"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "events": {
+            "minItems": 1,
+            "maxItems": 20,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "title": {
+                  "type": "string",
+                  "maxLength": 500
+                },
+                "time": {
+                  "type": "string",
+                  "maxLength": 500
+                },
+                "description": {
+                  "type": "string",
+                  "maxLength": 500
+                }
+              },
+              "required": [
+                "title"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "sections": {
+            "minItems": 1,
+            "maxItems": 12,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "title": {
+                  "type": "string",
+                  "maxLength": 500
+                },
+                "content": {
+                  "type": "string",
+                  "maxLength": 3000
+                }
+              },
+              "required": [
+                "title",
+                "content"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "tabs": {
+            "minItems": 1,
+            "maxItems": 8,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "title": {
+                  "type": "string",
+                  "maxLength": 500
+                },
+                "content": {
+                  "type": "string",
+                  "maxLength": 3000
+                }
+              },
+              "required": [
+                "title",
+                "content"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "items": {
+            "minItems": 1,
+            "maxItems": 20,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "title": {
+                  "type": "string",
+                  "maxLength": 500
+                },
+                "description": {
+                  "type": "string",
+                  "maxLength": 500
+                },
+                "url": {
+                  "type": "string",
+                  "maxLength": 2000,
+                  "pattern": "^(?:https:\\/\\/[a-zA-Z0-9.-]+(?::[0-9]{1,5})?(?:[/?#][^\\s\\\\]*)?|\\/(?!\\/)[^\\s\\\\]*)$"
+                }
+              },
+              "required": [
+                "title"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "pattern": "^[a-zA-Z][a-zA-Z0-9_-]*$"
+          },
+          "multiple": {
+            "type": "boolean"
+          },
+          "options": {
+            "minItems": 1,
+            "maxItems": 12,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "value": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 64,
+                  "pattern": "^[a-zA-Z][a-zA-Z0-9_-]*$"
+                },
+                "label": {
+                  "type": "string",
+                  "maxLength": 500
+                }
+              },
+              "required": [
+                "value",
+                "label"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "submitLabel": {
+            "type": "string",
+            "maxLength": 500
+          },
+          "action": {
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "send_message"
+                  },
+                  "message": {
+                    "type": "string",
+                    "minLength": 2,
+                    "maxLength": 1200
+                  }
+                },
+                "required": [
+                  "type",
+                  "message"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "open_url"
+                  },
+                  "url": {
+                    "type": "string",
+                    "maxLength": 2000,
+                    "pattern": "^(?:https:\\/\\/[a-zA-Z0-9.-]+(?::[0-9]{1,5})?(?:[/?#][^\\s\\\\]*)?|\\/(?!\\/)[^\\s\\\\]*)$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "url"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          },
+          "fields": {
+            "minItems": 1,
+            "maxItems": 10,
+            "type": "array",
+            "items": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64,
+                      "pattern": "^[a-zA-Z][a-zA-Z0-9_-]*$"
+                    },
+                    "label": {
+                      "type": "string",
+                      "maxLength": 500
+                    },
+                    "required": {
+                      "type": "boolean"
+                    },
+                    "placeholder": {
+                      "type": "string",
+                      "maxLength": 500
+                    },
+                    "type": {
+                      "type": "string",
+                      "const": "select"
+                    },
+                    "options": {
+                      "minItems": 1,
+                      "maxItems": 12,
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "value": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 64,
+                            "pattern": "^[a-zA-Z][a-zA-Z0-9_-]*$"
+                          },
+                          "label": {
+                            "type": "string",
+                            "maxLength": 500
+                          }
+                        },
+                        "required": [
+                          "value",
+                          "label"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "name",
+                    "label",
+                    "type",
+                    "options"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64,
+                      "pattern": "^[a-zA-Z][a-zA-Z0-9_-]*$"
+                    },
+                    "label": {
+                      "type": "string",
+                      "maxLength": 500
+                    },
+                    "required": {
+                      "type": "boolean"
+                    },
+                    "placeholder": {
+                      "type": "string",
+                      "maxLength": 500
+                    },
+                    "type": {
+                      "type": "string",
+                      "enum": [
+                        "text",
+                        "textarea",
+                        "number",
+                        "date",
+                        "checkbox"
+                      ]
+                    },
+                    "options": {
+                      "not": {}
+                    }
+                  },
+                  "required": [
+                    "name",
+                    "label",
+                    "type"
+                  ],
+                  "additionalProperties": false
+                }
+              ]
+            }
+          },
+          "message": {
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 1200
+          },
+          "confirmLabel": {
+            "type": "string",
+            "maxLength": 500
+          },
+          "cancelLabel": {
+            "type": "string",
+            "maxLength": 500
+          },
+          "children": {
+            "$ref": "#/$defs/children"
+          }
+        },
+        "required": [
+          "_type"
+        ]
+      },
+      "children": {
+        "description": "Nested generative UI rendered inside this component.",
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "$ref": "#/$defs/node"
+          },
+          {
+            "type": "array",
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "$ref": "#/$defs/node"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  },
+  "components": {
+    "Card": {
+      "description": "摘要卡片，可包含标题、说明和子组件。",
+      "children": true,
+      "props": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "maxLength": 500
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 500
+          }
+        },
+        "required": [
+          "title"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "Row": {
+      "description": "横向排列子组件，小屏幕自动换行。",
+      "children": true,
+      "props": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    "Fact": {
+      "description": "单个指标：名称、值和可选说明。",
+      "children": false,
+      "props": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "label": {
+            "type": "string",
+            "maxLength": 500
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 500
+              },
+              {
+                "type": "number"
+              }
+            ]
+          },
+          "detail": {
+            "type": "string",
+            "maxLength": 500
+          }
+        },
+        "required": [
+          "label",
+          "value"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "Chart": {
+      "description": "展示柱状图或折线图；数据来自查询结果或用户明确提供的示例，不得编造。",
+      "children": false,
+      "props": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "maxLength": 500
+          },
+          "chartType": {
+            "type": "string",
+            "enum": [
+              "bar",
+              "line"
+            ]
+          },
+          "points": {
+            "minItems": 1,
+            "maxItems": 30,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "label": {
+                  "type": "string",
+                  "maxLength": 500
+                },
+                "value": {
+                  "type": "number",
+                  "minimum": -1000000000000,
+                  "maximum": 1000000000000
+                }
+              },
+              "required": [
+                "label",
+                "value"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "unit": {
+            "type": "string",
+            "maxLength": 30
+          }
+        },
+        "required": [
+          "title",
+          "chartType",
+          "points"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "Table": {
+      "description": "只读数据表。每行单元格按 columns 顺序提供。",
+      "children": false,
+      "props": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "caption": {
+            "type": "string",
+            "maxLength": 500
+          },
+          "columns": {
+            "minItems": 1,
+            "maxItems": 8,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 100
+            }
+          },
+          "rows": {
+            "maxItems": 30,
+            "type": "array",
+            "items": {
+              "maxItems": 8,
+              "type": "array",
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "maxLength": 500
+                  },
+                  {
+                    "type": "number"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "required": [
+          "caption",
+          "columns",
+          "rows"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "Markdown": {
+      "description": "段落、列表、代码和链接，不支持原始 HTML。",
+      "children": false,
+      "props": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "content": {
+            "type": "string",
+            "maxLength": 4000
+          }
+        },
+        "required": [
+          "content"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "Alert": {
+      "description": "提示、成功、警告或错误信息。",
+      "children": false,
+      "props": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "maxLength": 500
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 500
+          },
+          "tone": {
+            "type": "string",
+            "enum": [
+              "neutral",
+              "info",
+              "success",
+              "warning",
+              "danger"
+            ]
+          }
+        },
+        "required": [
+          "title"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "Image": {
+      "description": "已知来源图片，必须提供替代文本，不得编造 URL。",
+      "children": false,
+      "props": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "src": {
+            "type": "string",
+            "maxLength": 2000,
+            "pattern": "^(?:https:\\/\\/[a-zA-Z0-9.-]+(?::[0-9]{1,5})?(?:[/?#][^\\s\\\\]*)?|\\/(?!\\/)[^\\s\\\\]*)$"
+          },
+          "alt": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "caption": {
+            "type": "string",
+            "maxLength": 500
+          },
+          "sourceUrl": {
+            "type": "string",
+            "maxLength": 2000,
+            "pattern": "^(?:https:\\/\\/[a-zA-Z0-9.-]+(?::[0-9]{1,5})?(?:[/?#][^\\s\\\\]*)?|\\/(?!\\/)[^\\s\\\\]*)$"
+          }
+        },
+        "required": [
+          "src",
+          "alt"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "Gallery": {
+      "description": "已知来源的多图集合。",
+      "children": false,
+      "props": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "maxLength": 500
+          },
+          "images": {
+            "minItems": 1,
+            "maxItems": 8,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "src": {
+                  "type": "string",
+                  "maxLength": 2000,
+                  "pattern": "^(?:https:\\/\\/[a-zA-Z0-9.-]+(?::[0-9]{1,5})?(?:[/?#][^\\s\\\\]*)?|\\/(?!\\/)[^\\s\\\\]*)$"
+                },
+                "alt": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 500
+                },
+                "caption": {
+                  "type": "string",
+                  "maxLength": 500
+                },
+                "sourceUrl": {
+                  "type": "string",
+                  "maxLength": 2000,
+                  "pattern": "^(?:https:\\/\\/[a-zA-Z0-9.-]+(?::[0-9]{1,5})?(?:[/?#][^\\s\\\\]*)?|\\/(?!\\/)[^\\s\\\\]*)$"
+                }
+              },
+              "required": [
+                "src",
+                "alt"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "title",
+          "images"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "Badge": {
+      "description": "简短的状态标记。",
+      "children": false,
+      "props": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "label": {
+            "type": "string",
+            "maxLength": 500
+          },
+          "tone": {
+            "type": "string",
+            "enum": [
+              "neutral",
+              "info",
+              "success",
+              "warning",
+              "danger"
+            ]
+          }
+        },
+        "required": [
+          "label"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "Tag": {
+      "description": "简短分类标签。",
+      "children": false,
+      "props": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "label": {
+            "type": "string",
+            "maxLength": 500
+          },
+          "tone": {
+            "type": "string",
+            "enum": [
+              "neutral",
+              "info",
+              "success",
+              "warning",
+              "danger"
+            ]
+          }
+        },
+        "required": [
+          "label"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "KeyValue": {
+      "description": "属性摘要，每项为 label/value，可用文字或数字。",
+      "children": false,
+      "props": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "maxLength": 500
+          },
+          "entries": {
+            "minItems": 1,
+            "maxItems": 20,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "label": {
+                  "type": "string",
+                  "maxLength": 500
+                },
+                "value": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "maxLength": 500
+                    },
+                    {
+                      "type": "number"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "label",
+                "value"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "entries"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "Steps": {
+      "description": "只读操作步骤；state 是 pending/current/completed。",
+      "children": false,
+      "props": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "maxLength": 500
+          },
+          "steps": {
+            "minItems": 1,
+            "maxItems": 12,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "title": {
+                  "type": "string",
+                  "maxLength": 500
+                },
+                "description": {
+                  "type": "string",
+                  "maxLength": 500
+                },
+                "state": {
+                  "type": "string",
+                  "enum": [
+                    "pending",
+                    "current",
+                    "completed"
+                  ]
+                }
+              },
+              "required": [
+                "title"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "title",
+          "steps"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "Timeline": {
+      "description": "按顺序展示事件、时间和说明。",
+      "children": false,
+      "props": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "maxLength": 500
+          },
+          "events": {
+            "minItems": 1,
+            "maxItems": 20,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "title": {
+                  "type": "string",
+                  "maxLength": 500
+                },
+                "time": {
+                  "type": "string",
+                  "maxLength": 500
+                },
+                "description": {
+                  "type": "string",
+                  "maxLength": 500
+                }
+              },
+              "required": [
+                "title"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "title",
+          "events"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "Accordion": {
+      "description": "折叠长说明，sections 中的 content 支持 Markdown。",
+      "children": false,
+      "props": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "maxLength": 500
+          },
+          "sections": {
+            "minItems": 1,
+            "maxItems": 12,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "title": {
+                  "type": "string",
+                  "maxLength": 500
+                },
+                "content": {
+                  "type": "string",
+                  "maxLength": 3000
+                }
+              },
+              "required": [
+                "title",
+                "content"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "title",
+          "sections"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "Tabs": {
+      "description": "切换内容视角；tabs 中的 content 支持 Markdown。",
+      "children": false,
+      "props": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "maxLength": 500
+          },
+          "tabs": {
+            "minItems": 1,
+            "maxItems": 8,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "title": {
+                  "type": "string",
+                  "maxLength": 500
+                },
+                "content": {
+                  "type": "string",
+                  "maxLength": 3000
+                }
+              },
+              "required": [
+                "title",
+                "content"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "title",
+          "tabs"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "List": {
+      "description": "搜索结果、推荐项或文档列表，可附安全链接。",
+      "children": false,
+      "props": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "maxLength": 500
+          },
+          "items": {
+            "minItems": 1,
+            "maxItems": 20,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "title": {
+                  "type": "string",
+                  "maxLength": 500
+                },
+                "description": {
+                  "type": "string",
+                  "maxLength": 500
+                },
+                "url": {
+                  "type": "string",
+                  "maxLength": 2000,
+                  "pattern": "^(?:https:\\/\\/[a-zA-Z0-9.-]+(?::[0-9]{1,5})?(?:[/?#][^\\s\\\\]*)?|\\/(?!\\/)[^\\s\\\\]*)$"
+                }
+              },
+              "required": [
+                "title"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "title",
+          "items"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "Choice": {
+      "description": "单选或多选后发送下一轮消息。id 在整棵树内必须唯一，options 的 value 不重复。",
+      "children": false,
+      "props": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "pattern": "^[a-zA-Z][a-zA-Z0-9_-]*$"
+          },
+          "title": {
+            "type": "string",
+            "maxLength": 500
+          },
+          "multiple": {
+            "type": "boolean"
+          },
+          "options": {
+            "minItems": 1,
+            "maxItems": 12,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "value": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 64,
+                  "pattern": "^[a-zA-Z][a-zA-Z0-9_-]*$"
+                },
+                "label": {
+                  "type": "string",
+                  "maxLength": 500
+                }
+              },
+              "required": [
+                "value",
+                "label"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "submitLabel": {
+            "type": "string",
+            "maxLength": 500
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "options"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "ActionButton": {
+      "description": "仅支持 send_message 或 open_url；不直接执行工具。id 在树内唯一。",
+      "children": false,
+      "props": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "pattern": "^[a-zA-Z][a-zA-Z0-9_-]*$"
+          },
+          "label": {
+            "type": "string",
+            "maxLength": 500
+          },
+          "action": {
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "send_message"
+                  },
+                  "message": {
+                    "type": "string",
+                    "minLength": 2,
+                    "maxLength": 1200
+                  }
+                },
+                "required": [
+                  "type",
+                  "message"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "open_url"
+                  },
+                  "url": {
+                    "type": "string",
+                    "maxLength": 2000,
+                    "pattern": "^(?:https:\\/\\/[a-zA-Z0-9.-]+(?::[0-9]{1,5})?(?:[/?#][^\\s\\\\]*)?|\\/(?!\\/)[^\\s\\\\]*)$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "url"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "action"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "Form": {
+      "description": "收集非敏感信息并作为下一轮消息提交。id 唯一，fields 的 name 唯一；select 必须提供 options，其他字段不要提供 options。不收集密码或凭证。",
+      "children": false,
+      "props": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "pattern": "^[a-zA-Z][a-zA-Z0-9_-]*$"
+          },
+          "title": {
+            "type": "string",
+            "maxLength": 500
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 500
+          },
+          "fields": {
+            "minItems": 1,
+            "maxItems": 10,
+            "type": "array",
+            "items": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64,
+                      "pattern": "^[a-zA-Z][a-zA-Z0-9_-]*$"
+                    },
+                    "label": {
+                      "type": "string",
+                      "maxLength": 500
+                    },
+                    "required": {
+                      "type": "boolean"
+                    },
+                    "placeholder": {
+                      "type": "string",
+                      "maxLength": 500
+                    },
+                    "type": {
+                      "type": "string",
+                      "const": "select"
+                    },
+                    "options": {
+                      "minItems": 1,
+                      "maxItems": 12,
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "value": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 64,
+                            "pattern": "^[a-zA-Z][a-zA-Z0-9_-]*$"
+                          },
+                          "label": {
+                            "type": "string",
+                            "maxLength": 500
+                          }
+                        },
+                        "required": [
+                          "value",
+                          "label"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "name",
+                    "label",
+                    "type",
+                    "options"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64,
+                      "pattern": "^[a-zA-Z][a-zA-Z0-9_-]*$"
+                    },
+                    "label": {
+                      "type": "string",
+                      "maxLength": 500
+                    },
+                    "required": {
+                      "type": "boolean"
+                    },
+                    "placeholder": {
+                      "type": "string",
+                      "maxLength": 500
+                    },
+                    "type": {
+                      "type": "string",
+                      "enum": [
+                        "text",
+                        "textarea",
+                        "number",
+                        "date",
+                        "checkbox"
+                      ]
+                    },
+                    "options": {
+                      "not": {}
+                    }
+                  },
+                  "required": [
+                    "name",
+                    "label",
+                    "type"
+                  ],
+                  "additionalProperties": false
+                }
+              ]
+            }
+          },
+          "submitLabel": {
+            "type": "string",
+            "maxLength": 500
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "fields"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "Confirmation": {
+      "description": "确认或取消一段用户意图，结果发送为下一轮消息；不是工具审批，不能替代平台授权。id 在树内唯一。",
+      "children": false,
+      "props": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "pattern": "^[a-zA-Z][a-zA-Z0-9_-]*$"
+          },
+          "title": {
+            "type": "string",
+            "maxLength": 500
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 500
+          },
+          "message": {
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 1200
+          },
+          "confirmLabel": {
+            "type": "string",
+            "maxLength": 500
+          },
+          "cancelLabel": {
+            "type": "string",
+            "maxLength": 500
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "description",
+          "message"
+        ],
+        "additionalProperties": false
+      }
+    }
+  }
+}
