@@ -1,11 +1,13 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, watch } from "vue";
+import { LayoutGrid, Settings } from "@vben/icons";
 import OutputContractEditor from "./OutputContractEditor.vue";
 import SkillFields from "./skill/fields.vue";
 import ToolFields from "../tools/ToolFields.vue";
 import {
   ElForm,
   ElFormItem,
+  ElIcon,
   ElTag,
   ElInput,
   ElInputNumber,
@@ -30,7 +32,6 @@ const props = defineProps<{
     | "all"
     | "basic"
     | "abilities"
-    | "collaboration"
     | "output"
     | "runtime"
     | "connection";
@@ -201,13 +202,13 @@ const choices = (kind: string) =>
   props.resources
     .filter(
       (r) =>
-        r.kind === (["mcp", "ui"].includes(kind) ? "tool" : kind) &&
+        r.kind === (kind === "mcp" ? "tool" : kind) &&
         r.enabled &&
         !r.archivedAt &&
         !r.deletedAt &&
-        (["mcp", "ui"].includes(kind)
-          ? r.toolType === kind
-          : kind !== "tool" || !["mcp", "ui"].includes(r.toolType)) &&
+        (kind === "mcp"
+          ? r.toolType === "mcp"
+          : kind !== "tool" || r.toolType !== "mcp") &&
         (kind !== "tool" ||
           ![
             "search_knowledge",
@@ -219,22 +220,32 @@ const choices = (kind: string) =>
     .flatMap((r) =>
       r.versions
         .filter((v: any) => v.status === "published")
-        .map((v: any) => ({ ...v, name: r.name, key: r.key })),
+        .map((v: any) => ({
+          ...v,
+          name: r.name,
+          key: r.key,
+          toolType: r.toolType,
+        })),
     );
-const selectedUi = computed({
-  get: () => selectedResources("ui", "toolVersionIds")[0],
-  set: value => updateResources("ui", "toolVersionIds", value ? [value] : []),
-});
-const uiEnabled = computed({
-  get: () => !!selectedUi.value,
-  set: value => { if (!value) selectedUi.value = undefined; },
-});
-const uiChoosing = ref(false);
+function isUiTool(versionId: number) {
+  return choices("tool").some(
+    (tool) => tool.id === versionId && tool.toolType === "ui",
+  );
+}
+function resourceDisabled(kind: string, option: any) {
+  const field = kind === "skill" ? "skillVersionIds" : "toolVersionIds";
+  return choices(kind).some(
+    (other) =>
+      other.id !== option.id &&
+      other.key === option.key &&
+      config.value[field]?.includes(other.id),
+  );
+}
 const selectedSkills = computed(() =>
   choices("skill").filter((s) => config.value.skillVersionIds?.includes(s.id)),
 );
 const selectedTools = computed(() =>
-  [...choices("tool"), ...choices("mcp"), ...choices("ui")].filter((t) =>
+  [...choices("tool"), ...choices("mcp")].filter((t) =>
     config.value.toolVersionIds?.includes(t.id),
   ),
 );
@@ -300,6 +311,25 @@ function updateResources(kind: string, field: string, selected: number[]) {
           <ElFormItem label="职责" required
             ><ElInput v-model="config.responsibility" type="textarea" :rows="3"
           /></ElFormItem>
+          <div>
+            <h3 class="mb-4 text-base font-semibold">欢迎标语与建议问题</h3>
+            <div class="grid grid-cols-1 gap-x-4 sm:grid-cols-2">
+              <ElFormItem label="标题"
+                ><ElInput v-model="config.welcome.title" /></ElFormItem
+              ><ElFormItem label="描述"
+                ><ElInput v-model="config.welcome.description"
+              /></ElFormItem>
+            </div>
+            <ElFormItem label="建议问题"
+              ><ElSelect
+                v-model="config.welcome.suggestedQuestions"
+                multiple
+                filterable
+                allow-create
+                default-first-option
+                class="w-full"
+            /></ElFormItem>
+          </div>
         </section>
         <section v-if="show('abilities')" class="space-y-6">
           <h3 class="mb-4 text-base font-semibold">能力资源</h3>
@@ -309,7 +339,7 @@ function updateResources(kind: string, field: string, selected: number[]) {
               {
                 kind: 'tool',
                 field: 'toolVersionIds',
-                label: 'HTTP / 内置业务工具',
+                label: 'Tools/工具',
               },
               {
                 kind: 'mcp',
@@ -320,6 +350,7 @@ function updateResources(kind: string, field: string, selected: number[]) {
             :key="pair.kind"
             :label="pair.label"
             ><ElSelect
+              :aria-label="pair.label"
               :model-value="selectedResources(pair.kind, pair.field)"
               @update:model-value="
                 updateResources(pair.kind, pair.field, $event)
@@ -327,21 +358,33 @@ function updateResources(kind: string, field: string, selected: number[]) {
               multiple
               filterable
               class="w-full"
-              ><ElOption
+              >
+              <template v-if="pair.kind === 'tool'" #label="{ label, value }">
+                <span class="inline-flex items-center gap-1">
+                  <ElIcon :aria-label="isUiTool(value) ? '生成式UI' : '工具'">
+                    <LayoutGrid v-if="isUiTool(value)" /><Settings v-else />
+                  </ElIcon>
+                  {{ label }}
+                </span>
+              </template>
+              <ElOption
                 v-for="r in choices(pair.kind)"
                 :key="r.id"
                 :value="r.id"
-                :label="`${r.name} · v${r.version}`" /></ElSelect
+                :label="`${r.name} · v${r.version}`"
+                :disabled="resourceDisabled(pair.kind, r)"
+              >
+                <span class="flex items-center gap-2">
+                  <ElIcon v-if="pair.kind === 'tool'" aria-hidden="true">
+                    <LayoutGrid v-if="r.toolType === 'ui'" /><Settings v-else />
+                  </ElIcon>
+                  <span>{{ r.name }} · v{{ r.version }}</span>
+                  <span v-if="pair.kind === 'tool'" class="ml-auto text-xs text-muted-foreground">
+                    {{ r.toolType === 'ui' ? '生成式UI' : '工具' }}
+                  </span>
+                </span>
+              </ElOption></ElSelect
           ></ElFormItem>
-          <ElFormItem label="生成式 UI（展示站）">
-            <div class="w-full space-y-3">
-              <ElSwitch :model-value="uiEnabled || uiChoosing" :disabled="disabled" @update:model-value="value => { uiChoosing = !!value; if (!value) uiEnabled = false; }" />
-              <p class="text-sm text-muted-foreground">默认关闭。开启并选择已发布的 present 组件目录后，Agent 才能调用。</p>
-              <ElSelect v-if="uiEnabled || uiChoosing" v-model="selectedUi" :disabled="disabled" clearable placeholder="选择已发布的 UI Tool 版本" class="w-full">
-                <ElOption v-for="r in choices('ui')" :key="r.id" :value="r.id" :label="`${r.name} · v${r.version}`" />
-              </ElSelect>
-            </div>
-          </ElFormItem>
           <div class="flex flex-wrap gap-2" aria-label="Agent 能力概览">
             <ElTag type="info">{{ selectedSkills.length }} 项指导资料</ElTag>
             <ElTag type="info">{{ selectedTools.length }} 项授权工具</ElTag>
@@ -478,14 +521,8 @@ function updateResources(kind: string, field: string, selected: number[]) {
             </div>
           </template>
         </section>
-        <OutputContractEditor
-          v-show="show('output')"
-          v-model="config.output"
-          :disabled="disabled"
-          @valid="emit('valid', $event)"
-        />
-        <section v-if="show('collaboration')" class="space-y-4">
-          <h3 class="mb-4 text-base font-semibold">协作方式</h3>
+        <section v-if="show('abilities')" class="space-y-4">
+          <h3 class="mb-4 text-base font-semibold">协作能力</h3>
           <ElFormItem label="执行方式">
             <ElSegmented
               v-model="executionMode"
@@ -554,6 +591,12 @@ function updateResources(kind: string, field: string, selected: number[]) {
             </div>
           </template>
         </section>
+        <OutputContractEditor
+          v-show="show('output')"
+          v-model="config.output"
+          :disabled="disabled"
+          @valid="emit('valid', $event)"
+        />
         <section v-if="show('runtime')" class="space-y-6">
           <div>
             <ElFormItem>
@@ -568,16 +611,13 @@ function updateResources(kind: string, field: string, selected: number[]) {
                 aria-label="允许文件产物"
               />
             </ElFormItem>
-            <h4 class="my-4 text-sm font-semibold">任务总预算</h4>
-            <div class="mb-3 text-sm text-muted-foreground">
-              单 Agent 与多 Agent
-              按需开启业务预算；关闭后仅受平台防循环、超时等安全保护。单 Agent
-              与多 Agent 共用任务预算。
+            <h4 class="my-4 flex items-center gap-1 text-sm font-semibold">
+              单轮对话预算限制
               <HelpTip
-                text="预算是限制而非预付费用；模型调用前保守预留 Token，实际用量返回后结算。调用方或应用设置了更低上限时，以更低的上限为准。"
+                text="限制一轮用户请求中累计的模型调用、工具调用和 Token 用量，多 Agent 协作共用本轮预算。关闭后仍受平台防循环、超时等安全保护。模型调用前保守预留 Token，实际用量返回后结算；应用每日额度独立累计并同时生效。"
                 long
               />
-            </div>
+            </h4>
             <ElAlert
               v-if="!config.executionLimits && !config.collaboration"
               class="mb-4"
@@ -678,25 +718,6 @@ function updateResources(kind: string, field: string, selected: number[]) {
                   class="w-full"
               /></ElFormItem>
             </div>
-          </div>
-          <div>
-            <h3 class="mb-4 text-base font-semibold">欢迎语</h3>
-            <div class="grid grid-cols-1 gap-x-4 sm:grid-cols-2">
-              <ElFormItem label="标题"
-                ><ElInput v-model="config.welcome.title" /></ElFormItem
-              ><ElFormItem label="描述"
-                ><ElInput v-model="config.welcome.description"
-              /></ElFormItem>
-            </div>
-            <ElFormItem label="建议问题"
-              ><ElSelect
-                v-model="config.welcome.suggestedQuestions"
-                multiple
-                filterable
-                allow-create
-                default-first-option
-                class="w-full"
-            /></ElFormItem>
           </div>
         </section>
       </div>

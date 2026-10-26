@@ -114,7 +114,7 @@ function credential(value: number | undefined) {
         @change="selectType"
       >
         <ElOption value="rest" label="HTTP 工具" />
-        <ElOption value="ui" label="生成式 UI（assistant-ui）" />
+        <ElOption value="ui" label="生成式UI" />
         <ElOption
           value="builtin"
           label="内置工具"
@@ -125,7 +125,7 @@ function credential(value: number | undefined) {
           ? "HTTP 工具"
           : config.type === "builtin"
             ? "内置工具"
-            : config.type === "ui" ? "生成式 UI（assistant-ui）" : "MCP 工具"
+            : config.type === "ui" ? "生成式UI" : "MCP 工具"
       }}</span></ElFormItem
     >
     <ElFormItem

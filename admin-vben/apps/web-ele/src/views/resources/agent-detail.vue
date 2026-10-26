@@ -56,7 +56,7 @@ const emit = defineEmits<{
   preview: [];
 }>();
 const section = ref<
-    "basic" | "abilities" | "collaboration" | "output" | "runtime"
+    "basic" | "abilities" | "output" | "runtime"
   >("basic"),
   history = ref(false);
 const router = useRouter(),
@@ -195,32 +195,16 @@ async function selectVersion(id: number) {
             <ElTabs v-model="section" :before-leave="() => !busy && !previewing">
               <ElTabPane name="basic" label="基本配置" />
               <ElTabPane name="abilities" label="能力" />
-              <ElTabPane name="collaboration" label="协作" />
               <ElTabPane name="output" label="输出规范" />
               <ElTabPane name="runtime" label="运行设置" />
             </ElTabs>
             <div
+              v-if="!editable"
               class="mb-4 flex flex-wrap items-center justify-between gap-2 text-sm text-muted-foreground"
             >
               <span>{{
-                editable
-                  ? "自动保存草稿，发布后生效"
-                  : `查看 v${active?.version}，不影响当前生效配置`
+                `查看 v${active?.version}，不影响当前生效配置`
               }}</span>
-              <ElButton
-                v-if="section === 'basic'"
-                link
-                type="primary"
-                @click="router.push('/prompts')"
-                >管理 Prompt</ElButton
-              >
-              <ElButton
-                v-if="section === 'abilities'"
-                link
-                type="primary"
-                @click="router.push('/tools')"
-                >管理资源</ElButton
-              >
             </div>
             <Fields
               :key="`${selected}:${active?.status}`"
