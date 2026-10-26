@@ -144,6 +144,12 @@ export class AgentApiController {
       ...(interactions ? { interactions } : {}),
     }));
   }
+  @Get('conversations/:id/configurations')
+  async configurations(@Req() request: IntegrationRequest, @Param('id', ParseUUIDPipe) id: string, @Query('userId') userId?: string) {
+    this.access.assertScope(request.integration, 'conversations:read');
+    const owner = await this.access.platformOwner(request.integration, userId);
+    return this.access.conversationConfigurations(request.integration.app.id, id, owner);
+  }
   @Get('conversations/:id/runs')
   async runs(@Req() request: IntegrationRequest, @Param('id', ParseUUIDPipe) id: string, @Query('userId') userId?: string) {
     this.access.assertScope(request.integration, 'conversations:read');

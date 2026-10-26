@@ -95,6 +95,10 @@ export class ToolManagementController {
       throw new ForbiddenException("获取并更新目录需要配置管理权限");
     return this.service.probe(r.admin!.id, id, body, true);
   }
+  @Post("mcp/:id/publish") @RequirePermission("agent_config.manage")
+  publishService(@Req() r:AdminRequest,@Param("id",ParseIntPipe) id:number,@Body() body:unknown) {
+    return this.service.publishService(r.admin!.id,id,body);
+  }
   @Post("mcp/:id/tools") @RequirePermission("agent_config.manage") importTool(
     @Req() r: AdminRequest,
     @Param("id", ParseIntPipe) id: number,

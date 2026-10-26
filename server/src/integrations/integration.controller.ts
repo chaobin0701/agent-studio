@@ -17,6 +17,10 @@ export class AdminIntegrationController {
   list() { return this.access.list(); }
   @Get('agent-options') @RequirePermission('integrations.read','integrations.manage')
   agentOptions() {return this.access.agentOptions();}
+  @Get(':id/conversations/:conversationId/configurations') @RequirePermission('conversations.debug')
+  configurations(@Param('id', ParseUUIDPipe) id: string, @Param('conversationId', ParseUUIDPipe) conversationId: string) {
+    return this.access.conversationConfigurations(id, conversationId);
+  }
   @Get(':id') @RequirePermission('integrations.read', 'integrations.manage')
   detail(@Param('id', ParseUUIDPipe) id: string) { return this.access.detail(id); }
   @Post() @RequirePermission('integrations.manage')

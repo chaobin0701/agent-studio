@@ -119,8 +119,7 @@ const selected = computed(() =>
         ><ElCheckboxGroup v-model="config.scopes"
           ><ElCheckbox value="chat:write">执行任务</ElCheckbox
           ><ElCheckbox value="conversations:read">读取会话</ElCheckbox
-          ><ElCheckbox value="conversations:delete">删除会话</ElCheckbox
-          ><ElCheckbox value="usage:read">读取用量</ElCheckbox></ElCheckboxGroup
+          ><ElCheckbox value="conversations:delete">删除会话</ElCheckbox></ElCheckboxGroup
         ></ElFormItem
       >
       <ElDivider class="sm:col-span-2">运行额度</ElDivider>

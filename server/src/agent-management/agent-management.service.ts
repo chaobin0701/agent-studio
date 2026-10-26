@@ -92,6 +92,7 @@ export class AgentManagementService {
  }
  async options() {
   return {tools:this.tools.list().filter(t=>!isSystemTool(t.name)).map(t=>({key:t.name,description:t.description,workflow:t.execution?.workflow??null,parameters:z.toJSONSchema(t.inputSchema,{io:'input',unrepresentable:'any'})})),
+   mcpServices:this.externalTools?await this.externalTools.agentMcpOptions():[],
    knowledgeBases:await this.knowledgeChoices(this.db),
    members:(await this.db.query(`SELECT v.id::int,r.id::int AS "resourceId",r.resource_key AS key,r.name,v.version,v.config->>'responsibility' AS responsibility
     FROM agent_resources r JOIN agent_resource_versions v ON v.resource_id=r.id

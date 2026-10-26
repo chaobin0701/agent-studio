@@ -61,6 +61,10 @@ export class IntegrationChatGateway {
       key,
       normalizedContext,
     );
+    if (!admission.cached) {
+      try { await this.access.captureConfiguration(admission.callId, compositionSnapshot, identity.app); }
+      catch (error) { await this.access.finish(admission.callId, null); throw error; }
+    }
     return {
       identity,
       ownerId,

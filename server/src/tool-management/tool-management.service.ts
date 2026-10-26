@@ -6,6 +6,7 @@ import {
   NotFoundException,
 } from "@nestjs/common";
 import { z } from "zod";
+import { mcpServiceBindings } from "./mcp-service-binding";
 import { DatabaseService } from "../database.service";
 import { SecretBox } from "../security/secret-box";
 import {
@@ -290,6 +291,7 @@ export class ToolManagementService {
       archivedAt: versions[0].archivedAt ?? null,
       deletedAt: versions[0].deletedAt ?? null,
       versions,
+      bindings: (await this.agentMcpOptions()).filter(binding => binding.serverId === id),
       resources,
     };
   }
@@ -495,6 +497,60 @@ export class ToolManagementService {
     await this.audit(this.db, actor, "mcp_server.tested", id, result);
     return result;
   }
+  async agentMcpOptions() {
+    const versions = (await this.db.query<ConnectionVersion>(versionSelect + " ORDER BY s.id,v.version DESC")).rows;
+    if (!versions.length) return [];
+    const capabilities = (await this.db.query<{id:number;version:number;target:string;mcpVersionId:number;enabled:boolean}>(
+      `SELECT v.id::int,v.version,v.config->>'target' AS target,(v.config->>'mcpVersionId')::int AS "mcpVersionId",(r.enabled AND r.archived_at IS NULL AND r.deleted_at IS NULL) AS enabled
+       FROM agent_resources r JOIN agent_resource_versions v ON v.resource_id=r.id
+       WHERE r.kind='tool'
+       AND v.status='published' AND v.config->>'type'='mcp' AND (v.config->>'mcpVersionId')::bigint=ANY($1::bigint[])`, [versions.map(version=>version.id)],
+    )).rows;
+    return mcpServiceBindings(versions, capabilities);
+  }
+
+  /** Publish one discovered catalog atomically, without executing its methods.
+   * Existing adapters retain policy; new capabilities require human approval. */
+  async publishService(actor:number, id:number, body:unknown) {
+    const input=this.parse(z.object({versionId:z.number().int().positive()}).strict(),body);
+    const version=await this.connectionVersion(input.versionId);
+    if(version.serverId!==id || !version.enabled || !version.catalog.length)
+      throw new BadRequestException("请选择已启用并已发现能力目录的 MCP 服务版本");
+    return this.db.transaction(async c=>{
+      await lifecycleWriteLock(c);
+      const server=(await c.query("SELECT id FROM mcp_servers WHERE id=$1 AND enabled AND archived_at IS NULL AND deleted_at IS NULL FOR UPDATE",[id])).rows[0];
+      if(!server) throw new BadRequestException("MCP 服务已停用或移除");
+      const latest=(await c.query("SELECT id::int FROM mcp_server_versions WHERE server_id=$1 ORDER BY version DESC LIMIT 1",[id])).rows[0];
+      if(latest?.id!==version.id) throw new ConflictException("仅可发布最新目录；请刷新后选择当前连接版本");
+      const toolVersionIds:number[]=[];
+      for(const definition of version.catalog) {
+        try {
+          if(definition.inputSchema.type!=='object') throw new Error('object schema required');
+          z.fromJSONSchema(definition.inputSchema as any);
+          if(definition.outputSchema) z.fromJSONSchema(definition.outputSchema as any);
+        } catch {throw new BadRequestException(`MCP 能力 ${definition.name} 的参数或输出契约无法解析`);}
+        const existing=(await c.query<{id:number}>(`SELECT v.id::int FROM agent_resources r JOIN agent_resource_versions v ON v.resource_id=r.id
+          WHERE r.kind='tool' AND r.enabled AND r.archived_at IS NULL AND r.deleted_at IS NULL AND v.status='published'
+          AND v.config->>'type'='mcp' AND (v.config->>'mcpVersionId')::bigint=$1 AND v.config->>'target'=$2 ORDER BY v.version DESC,v.id DESC LIMIT 1`,[version.id,definition.name])).rows[0];
+        if(existing) {toolVersionIds.push(existing.id);continue;}
+        const config=toolSchema.parse({type:'mcp',target:definition.name,mcpVersionId:version.id,
+          description:(definition.description?.trim()||definition.name).slice(0,2000),parameters:definition.inputSchema,
+          ...(definition.outputSchema?{outputSchema:definition.outputSchema}:{}),readOnly:false,requiresApproval:true,maxRetries:0,timeoutMs:version.config.timeoutMs});
+        const resource=(await c.query<{id:number;archived_at:unknown;deleted_at:unknown;enabled:boolean}>(`INSERT INTO agent_resources(kind,resource_key,name) VALUES('tool',$1,$2)
+          ON CONFLICT(workspace_id,kind,resource_key) DO UPDATE SET resource_key=EXCLUDED.resource_key RETURNING id::int,archived_at,deleted_at,enabled`,[mcpResourceKey(version.key,definition.name),`${version.name} · ${definition.name}`.slice(0,160)])).rows[0];
+        if(resource.archived_at || resource.deleted_at || !resource.enabled) throw new ConflictException("关联能力曾被停用或移除，请先恢复后再发布");
+        await c.query("SELECT id FROM agent_resources WHERE id=$1 FOR UPDATE",[resource.id]);
+        const next=(await c.query<{n:number}>("SELECT COALESCE(max(version),0)+1 AS n FROM agent_resource_versions WHERE resource_id=$1",[resource.id])).rows[0].n;
+        const proof={ok:true,validationOnly:true,source:'mcp-discovery',mcpVersionId:version.id};
+        const created=(await c.query<{id:number}>(`INSERT INTO agent_resource_versions(resource_id,version,config,status,tested_revision,test_result,published_at)
+          VALUES($1,$2,$3,'published',1,$4,now()) RETURNING id::int`,[resource.id,next,JSON.stringify(config),JSON.stringify(proof)])).rows[0];
+        toolVersionIds.push(created.id);
+      }
+      await this.audit(c,actor,"mcp_service.published",id,{versionId:version.id,capabilityCount:toolVersionIds.length});
+      return {ok:true,versionId:version.id,capabilityCount:toolVersionIds.length,toolVersionIds};
+    });
+  }
+
   async importTool(actor: number, id: number, body: unknown) {
     const input = this.parse(
       z

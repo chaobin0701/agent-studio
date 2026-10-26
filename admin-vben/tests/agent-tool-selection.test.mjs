@@ -38,7 +38,7 @@ test('existing UI bindings appear alongside ordinary Tools and count once, while
   const { page } = fixture();
   assert.deepEqual(Array.from(page.choices('tool'), item => item.id), [1, 2, 3, 4]);
   assert.deepEqual(Array.from(page.selectedResources('tool', 'toolVersionIds')), [1, 3]);
-  assert.deepEqual(Array.from(page.selectedTools.value, item => item.id), [1, 3, 5]);
+  assert.deepEqual(Array.from(page.selectedTools.value, item => item.id), [1, 3]);
   assert.equal(page.isUiTool(3), true);
   assert.equal(page.isUiTool(1), false);
 });

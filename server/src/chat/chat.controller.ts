@@ -90,6 +90,12 @@ export class ChatController {
     return this.conversations.runs(await this.conversations.session(request, response), id);
   }
 
+  @Get('conversations/:id/configurations')
+  async configurations(@Req() request: IntegrationRequest, @Res({ passthrough: true }) response: Response, @Param('id', ParseUUIDPipe) id: string) {
+    this.access!.assertScope(request.integration, 'conversations:read');
+    return this.access!.conversationConfigurations(request.integration.app.id, id, await this.conversations.session(request, response));
+  }
+
   @Get('conversations/:id/context')
   async context(@Param('id', ParseUUIDPipe) id: string, @Req() request: Request, @Res({ passthrough: true }) response: Response) {
     return this.conversations.context(await this.conversations.session(request, response), id);

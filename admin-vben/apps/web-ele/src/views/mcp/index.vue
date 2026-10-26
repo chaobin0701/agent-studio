@@ -156,6 +156,7 @@ const active = computed(() =>
 const dirty = computed(
   () => !!detail.value && original.value !== JSON.stringify(config.value),
 );
+const activeBinding = computed(() => detail.value?.bindings?.find((binding:any) => binding.id === selected.value));
 const leave = useUnsavedChanges(dirty);
 const oldCatalog = computed(
   () =>
@@ -264,7 +265,7 @@ async function create() {
     if (route.fullPath !== path) return;
     createOpen.value = false;
     await router.push(`/mcp/${value.id}`);
-    ElMessage.success("服务已创建，请测试连接并获取工具");
+    ElMessage.success("服务已创建，请测试连接并获取能力目录");
   });
 }
 async function save() {
@@ -294,21 +295,15 @@ async function probe(discover = false) {
     if (discover && result.value.ok) await load(result.value.id);
   });
 }
-async function importTool(tool: any) {
+async function publishService() {
+  if (dirty.value) return ElMessage.warning("请先保存连接设置并刷新能力目录");
   try {
-    await ElMessageBox.confirm(
-      `将 ${tool.name} 的当前契约创建为 Tool 草稿？默认不自动授权，也不自动发布。`,
-      "导入工具",
-    );
-  } catch {
-    return;
-  }
+    await ElMessageBox.confirm("将此版本的完整目录发布为一个 MCP 服务供 Agent 整体接入。已有能力保留原审批策略，新增能力默认需要审批；不会执行业务方法或自动绑定 Agent。", "发布 MCP 服务");
+  } catch { return; }
   await run(async () => {
-    const value = await api.post(
-      `/external-tools/mcp/${detail.value.id}/tools`,
-      { versionId: selected.value, toolName: tool.name },
-    );
-    await router.push(`/tools/${value.resourceId}`);
+    await api.post(`/external-tools/mcp/${detail.value.id}/publish`, { versionId: selected.value });
+    await load(selected.value);
+    ElMessage.success("MCP 服务目录已发布，可在 Agent 中整体接入");
   });
 }
 async function toggle() {
@@ -406,7 +401,7 @@ watch(
           }}</template></ElTableColumn
         ><ElTableColumn
           prop="toolCount"
-          label="已发现工具"
+          label="已发现能力"
           width="120" /><ElTableColumn label="状态" width="110"
           ><template #default="{ row }"
             ><ElTag :type="row.enabled ? 'success' : 'info'">{{
@@ -444,7 +439,7 @@ watch(
           <span class="text-sm text-muted-foreground">{{
             dirty
               ? "连接有未保存修改"
-              : `连接 v${active?.version} · ${active?.catalog.length ?? 0} 个工具`
+              : `连接 v${active?.version} · ${active?.catalog.length ?? 0} 项能力`
           }}</span>
         </div>
         <div class="flex flex-wrap items-center gap-2">
@@ -471,7 +466,7 @@ watch(
               busy || !detail.enabled || selected !== detail.versions[0].id
             "
             @click="probe(true)"
-            >获取／刷新工具</ElButton
+            >获取／刷新能力</ElButton
           >
           <ResourceLifecycle
             :resource="detail"
@@ -488,12 +483,12 @@ watch(
         :closable="false"
         :title="
           result.ok
-            ? `连接验证成功 · ${result.toolCount ?? 0} 个工具 · ${result.durationMs} ms`
+            ? `连接验证成功 · ${result.toolCount ?? 0} 项能力 · ${result.durationMs} ms`
             : `${result.content}（${result.errorCode}）`
         "
       />
       <ElTabs v-model="tab">
-        <ElTabPane name="tools" label="工具目录" />
+        <ElTabPane name="tools" label="能力目录" />
         <ElTabPane name="connection" label="连接设置" />
       </ElTabs>
       <div v-show="tab === 'connection'">
@@ -524,11 +519,15 @@ watch(
         ></ElForm>
       </div>
       <div v-show="tab === 'tools'" class="space-y-4">
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <p class="text-sm text-muted-foreground">本版本包含 {{ active?.catalog.length ?? 0 }} 项原生能力，Agent 按整个 MCP 服务接入。</p>
+          <ElButton v-if="canManage" type="primary" :loading="busy" :disabled="dirty || !detail.enabled || resourceRemoved || !active?.catalog.length || selected !== detail.versions[0]?.id || activeBinding?.ready" @click="publishService">{{ activeBinding?.ready ? '已发布，可整体接入' : '发布整个 MCP 服务' }}</ElButton>
+        </div>
         <ElAlert
           v-if="!active?.catalog.length"
           type="info"
           :closable="false"
-          title="尚未发现工具；保存连接后点击“获取／刷新工具”。发现工具不会自动导入或发布。"
+          title="尚未发现能力目录；保存连接后获取目录，再按整个服务发布和接入。"
         />
         <ElTable :data="changes"
           ><ElTableColumn prop="name" label="原生名称" /><ElTableColumn
@@ -539,22 +538,12 @@ watch(
                 row.change
               }}</ElTag></template
             ></ElTableColumn
-          ><ElTableColumn label="操作" width="190"
-            ><template #default="{ row }"
-              ><ElButton
-                v-if="editableManage"
-                link
-                type="primary"
-                @click="importTool(row)"
-                >创建 / 更新 Tool 草稿</ElButton
-              ></template
-            ></ElTableColumn
           ><ElTableColumn type="expand"
             ><template #default="{ row }">
               <JsonEditor
                 class="p-4"
                 readonly
-                label="MCP 工具契约"
+                label="MCP 能力契约"
                 :model-value="
                   JSON.stringify(
                     {
@@ -573,23 +562,6 @@ watch(
           type="warning"
           :closable="false"
         />
-        <ElCollapse
-          ><ElCollapseItem title="已导入工具及关联版本"
-            ><ElTable :data="detail.resources"
-              ><ElTableColumn prop="name" label="工具" /><ElTableColumn
-                prop="mcpVersionId"
-                label="连接版本 ID"
-              /><ElTableColumn prop="status" label="发布状态" /><ElTableColumn
-                label="管理"
-                ><template #default="{ row }"
-                  ><ElButton link @click="router.push(`/tools/${row.id}`)"
-                    >工具详情</ElButton
-                  ></template
-                ></ElTableColumn
-              ></ElTable
-            ></ElCollapseItem
-          ></ElCollapse
-        >
       </div>
     </PagePanel>
     <ElDialog
@@ -609,9 +581,9 @@ watch(
             >v{{ row.version }}</template
           ></ElTableColumn
         >
-        <ElTableColumn label="工具目录"
+        <ElTableColumn label="能力目录"
           ><template #default="{ row }"
-            >{{ row.catalog.length }} 个工具</template
+            >{{ row.catalog.length }} 项能力</template
           ></ElTableColumn
         >
         <ElTableColumn label="操作"
@@ -631,7 +603,7 @@ watch(
       </ElTable>
       <div v-if="detail" class="mt-4 flex flex-wrap items-center gap-3">
         <span class="text-sm text-muted-foreground"
-          >{{ detail.key }} · 历史连接与已导入的工具绑定保持不变</span
+          >{{ detail.key }} · 历史连接版本与已有 Agent 绑定保持不变</span
         >
         <ElButton v-if="editableManage" :disabled="busy" @click="toggle">{{
           detail.enabled ? "停用服务" : "启用服务"

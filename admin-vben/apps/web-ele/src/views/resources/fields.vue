@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, watch } from "vue";
 import { LayoutGrid, Settings } from "@vben/icons";
+import { selectedMcpServices, selectMcpServices, type McpServiceChoice } from "./mcp-service-selection";
 import OutputContractEditor from "./OutputContractEditor.vue";
 import SkillFields from "./skill/fields.vue";
 import ToolFields from "../tools/ToolFields.vue";
@@ -245,10 +246,18 @@ const selectedSkills = computed(() =>
   choices("skill").filter((s) => config.value.skillVersionIds?.includes(s.id)),
 );
 const selectedTools = computed(() =>
-  [...choices("tool"), ...choices("mcp")].filter((t) =>
+  choices("tool").filter((t) =>
     config.value.toolVersionIds?.includes(t.id),
   ),
 );
+const mcpServices = computed<McpServiceChoice[]>(() => props.options.mcpServices ?? []);
+const selectedServices = computed({
+  get: () => selectedMcpServices(config.value.toolVersionIds ?? [], mcpServices.value),
+  set: (selected:number[]) => { config.value.toolVersionIds = selectMcpServices(config.value.toolVersionIds ?? [], selected, mcpServices.value); },
+});
+function serviceDisabled(option:McpServiceChoice) {
+  return (!option.ready && !selectedServices.value.includes(option.id)) || mcpServices.value.some(other=>other.id!==option.id&&other.serverId===option.serverId&&selectedServices.value.includes(other.id));
+}
 function selectedResources(kind: string, field: string) {
   if (field !== "toolVersionIds") return config.value[field];
   const ids = new Set(choices(kind).map((resource: any) => resource.id));
@@ -341,11 +350,6 @@ function updateResources(kind: string, field: string, selected: number[]) {
                 field: 'toolVersionIds',
                 label: 'Tools/工具',
               },
-              {
-                kind: 'mcp',
-                field: 'toolVersionIds',
-                label: 'MCP 工具',
-              },
             ]"
             :key="pair.kind"
             :label="pair.label"
@@ -385,9 +389,18 @@ function updateResources(kind: string, field: string, selected: number[]) {
                 </span>
               </ElOption></ElSelect
           ></ElFormItem>
+          <ElFormItem label="MCP 服务">
+            <ElSelect v-model="selectedServices" aria-label="MCP 服务" multiple filterable class="w-full" placeholder="选择整个 MCP 服务及目录版本">
+              <ElOption v-for="service in mcpServices" :key="service.id" :value="service.id" :label="`${service.name} · v${service.version} · ${service.capabilityCount} 项能力`" :disabled="serviceDisabled(service)">
+                <span>{{ service.name }} · v{{ service.version }}</span><span class="float-right ml-4 text-xs text-muted-foreground">{{ service.enabled === false ? '服务不可用' : service.ready ? `${service.capabilityCount} 项能力` : '目录待发布' }}</span>
+              </ElOption>
+            </ElSelect>
+            <p class="mt-2 text-xs text-muted-foreground">按整个服务接入并固定目录版本；服务内能力在 MCP 管理中统一维护。</p>
+          </ElFormItem>
           <div class="flex flex-wrap gap-2" aria-label="Agent 能力概览">
             <ElTag type="info">{{ selectedSkills.length }} 项指导资料</ElTag>
             <ElTag type="info">{{ selectedTools.length }} 项授权工具</ElTag>
+            <ElTag type="info">{{ selectedServices.length }} 个 MCP 服务</ElTag>
             <HelpTip
               text="Skill 是按需读取的指导资料，不是独立执行者。所有工具和知识库权限只由此 Agent 的配置决定；需要独立模型和能力范围时，请创建成员 Agent。"
               long

@@ -54,7 +54,6 @@ const scopeOptions = [
   { value: "chat:write", label: "执行任务" },
   { value: "conversations:read", label: "读取会话" },
   { value: "conversations:delete", label: "删除会话" },
-  { value: "usage:read", label: "读取用量" },
 ];
 const origins = ref("");
 const dirty = computed(

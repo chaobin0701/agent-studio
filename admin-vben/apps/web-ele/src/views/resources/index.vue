@@ -194,6 +194,7 @@ const items = computed(() =>
   resources.value.filter(
     (r) =>
       r.kind === kind.value &&
+      (kind.value !== "tool" || r.toolType !== "mcp") &&
       (!search.value ||
         `${r.name} ${r.key}`
           .toLowerCase()

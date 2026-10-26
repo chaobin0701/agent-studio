@@ -69,15 +69,32 @@ const application = (overrides = {}) => ({
 });
 const apiIdentity = (app, scopes = app.scopes) => ({ app, kind: "api", scopes });
 
-test("display quota is hidden when caps are off or the identity lacks usage permission", async () => {
-  const disabled = quotaService({ app: application({ dailyRequests: null, dailyTokenLimit: null }) });
-  assert.deepEqual(await disabled.displayQuota(apiIdentity(disabled.appValue)), { quota: null });
-  const hidden = quotaService({ app: application() });
-  assert.deepEqual(await hidden.displayQuota(apiIdentity(hidden.appValue, ["chat:write"])), { quota: null });
-  const switchedOff = quotaService({ app: application({ limitSettings: { dailyRequests: false, dailyTokenLimit: false } }) });
-  assert.deepEqual(await switchedOff.displayQuota(apiIdentity(switchedOff.appValue)), { quota: null });
-  const website = quotaService({ app: application() });
-  assert.deepEqual(await website.displayQuota({ app: website.appValue, kind: "website", ownerId: "visitor-id", scopes: ["conversations:read"] }), { quota: null });
+test("display quota needs no usage scope and disabled limits are omitted", async () => {
+  for (const app of [application({ dailyRequests: null, dailyTokenLimit: null }), application({ limitSettings: { requestsPerMinute:false, dailyRequests:false, dailyTokenLimit:false } })]) {
+    const service = quotaService({ app });
+    const { quota } = await service.displayQuota(apiIdentity(app, ["chat:write"]));
+    assert.equal(quota.scope, "application-shared");
+    for (const field of ["requests", "tokens", "minute"]) assert.equal(field in quota, false);
+  }
+  const service = quotaService({ app: application() });
+  const { quota } = await service.displayQuota(apiIdentity(service.appValue, ["chat:write"]));
+  assert.equal(quota.requests.used, 4);
+  const website = await service.displayQuota({ app: service.appValue, kind: "website", ownerId: "visitor-id", scopes: ["conversations:read"] });
+  assert.equal(website.quota.requests.used, 4);
+  const disabled = quotaService({ app: application({ enabled:false }) });
+  assert.deepEqual(await disabled.displayQuota(apiIdentity(disabled.appValue)), {quota:null});
+});
+
+test("minute-only shared quota uses the same rolling sixty-second application window", async () => {
+  const service = quotaService({ app: application({requestsPerMinute:10,limitSettings:{dailyRequests:false,dailyTokenLimit:false,requestsPerMinute:true}}) });
+  service.db = { query: async (sql, values) => {
+    assert.match(sql, /created_at>now\(\)-interval '60 seconds'/);
+    assert.deepEqual(values, ['app-id']);
+    return {rows:[{used:10,retryAt:'2026-10-26T10:00:00Z'}]};
+  }};
+  const { quota } = await service.displayQuota(apiIdentity(service.appValue, []));
+  assert.deepEqual(quota.minute, {limit:10,used:10,remaining:0,windowSeconds:60,retryAt:'2026-10-26T10:00:00.000Z'});
+  assert.equal('requests' in quota, false);
 });
 
 test("display quota exposes only application-shared enabled limits and subtracts reservations", async () => {

@@ -1,3 +1,5 @@
+import { configurationSummary, publicConfiguration, type ConfigurationSummary, type SummaryResource } from './configuration-summary';
+import type { CompositionSnapshot } from '../agent-management/runtime-scope';
 import {
   BadRequestException,
   ConflictException,
@@ -1071,8 +1073,29 @@ export class IntegrationService implements OnModuleInit {
     return transaction?work(transaction):this.db.transaction(work);
   }
 
+  async captureConfiguration(callId: string, snapshot: CompositionSnapshot, app: IntegrationApp) {
+    const entry = snapshot.agents.get(snapshot.entryVersionId)!;
+    const ids = [...entry.spec.toolVersionIds, ...entry.spec.skillVersionIds];
+    const resources = (await this.db.query<SummaryResource>(`SELECT v.id::int,r.name,v.version,v.config->>'type' AS "toolType",
+      (v.config->>'mcpVersionId')::int AS "mcpVersionId"
+      FROM agent_resource_versions v JOIN agent_resources r ON r.id=v.resource_id WHERE v.id=ANY($1::bigint[])`, [ids])).rows;
+    const mcpIds = [...new Set(resources.filter(item => item.toolType === 'mcp').map(item => item.mcpVersionId))];
+    const mcp = mcpIds.length ? (await this.db.query<{id:number;name:string;version:number}>(`SELECT v.id::int,s.name,v.version FROM mcp_server_versions v JOIN mcp_servers s ON s.id=v.server_id WHERE v.id=ANY($1::bigint[])`, [mcpIds])).rows : [];
+    const knowledge = (await this.db.query<{id:number;name:string}>('SELECT id::int,name FROM knowledge_bases WHERE id=ANY($1::bigint[])', [entry.knowledge.map(item => item.id)])).rows;
+    const summary = configurationSummary(snapshot, app, callId, resources, mcp, knowledge);
+    await this.db.query('UPDATE integration_calls SET configuration_summary=$2 WHERE id=$1 AND configuration_summary IS NULL', [callId, JSON.stringify(summary)]);
+  }
+
+  async conversationConfigurations(appId: string, conversationId: string, ownerId?: string) {
+    const exists = await this.db.query('SELECT id FROM conversations WHERE id=$1 AND application_id=$2 AND ($3::uuid IS NULL OR visitor_session_id=$3)', [conversationId, appId, ownerId ?? null]);
+    if (!exists.rows.length) throw new NotFoundException('会话不存在');
+    const rows = (await this.db.query<{id:string;status:string;startedAt:string;snapshot:ConfigurationSummary|null}>(
+      `SELECT id,status,created_at AS "startedAt",configuration_summary AS snapshot FROM integration_calls
+       WHERE app_id=$1 AND conversation_id=$2 ORDER BY created_at,id`, [appId, conversationId])).rows;
+    return { turns: rows.map((item, index) => ({ ...item, number: index + 1, snapshot: ownerId ? publicConfiguration(item.snapshot) : item.snapshot })) };
+  }
+
   async publicUsage(identity: IntegrationIdentity) {
-    if (identity.kind === "api") this.assertScope(identity, "usage:read");
     const owner = identity.kind === "website" ? identity.ownerId : undefined;
     if (identity.kind === "website" && !owner)
       throw new UnauthorizedException("访客身份无效");
@@ -1101,18 +1124,15 @@ export class IntegrationService implements OnModuleInit {
     };
   }
 
-  /** Minimal composer projection. Unconfigured or unauthorized quotas are omitted. */
+  /** Enabled application limits are readable by every authenticated application client. */
   async displayQuota(identity: IntegrationIdentity) {
     const app = await this.app(identity.app.id);
     const appEnabled = app.enabled &&
       (identity.kind === "api" ? app.apiEnabled : app.websiteEnabled);
-    const mayRead = identity.scopes.includes("usage:read") && app.scopes.includes("usage:read") &&
-      (identity.kind === "api" || Boolean(identity.ownerId));
-    if (!appEnabled || !mayRead) return { quota: null };
-
+    if (!appEnabled || (identity.kind === "website" && !identity.ownerId)) return { quota: null };
     const requestLimit = applicationLimit(app, "dailyRequests");
     const tokenLimit = applicationLimit(app, "dailyTokenLimit");
-    if (requestLimit === null && tokenLimit === null) return { quota: null };
+    const minuteLimit = applicationLimit(app, "requestsPerMinute");
 
     this.checkInspectionRate(identity);
     const daily = await this.tokens.daily(app.id);
@@ -1122,12 +1142,17 @@ export class IntegrationService implements OnModuleInit {
         [app.id],
       )
     ).rows[0]?.used ?? 0;
+    const minute = minuteLimit === null ? undefined : (await this.db.query<{ used: number; retryAt: string }>(
+      `SELECT count(*)::int AS used, COALESCE(min(created_at)+interval '60 seconds',now()) AS "retryAt"
+       FROM integration_calls WHERE app_id=$1 AND created_at>now()-interval '60 seconds'`, [app.id],
+    )).rows[0];
     return {
       quota: {
         scope: "application-shared" as const,
         resetAt: daily.resetAt,
         timezone: daily.timezone,
         checkedAt: new Date().toISOString(),
+        ...(minute ? { minute: { limit: minuteLimit!, used: minute.used, remaining: Math.max(0, minuteLimit! - minute.used), windowSeconds: 60 as const, retryAt: new Date(minute.retryAt).toISOString() } } : {}),
         ...(requestLimit !== null ? {
           requests: {
             limit: requestLimit,
