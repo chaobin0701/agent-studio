@@ -99,12 +99,90 @@ test('scope edits enforce credential ownership and permissions in every bound wo
   checkedWorkspaces.length = 0;
   await service.updateCredentialScopes(3, 7, { scopes: ['agents.manage'] });
   assert.deepEqual(checkedWorkspaces, [12, 13]);
-  assert.deepEqual(audits, [{ previousScopes: ['agents.read'], scopes: ['agents.manage'] }]);
+  assert.deepEqual(audits, [{ previousScopes: ['agents.read'], scopes: ['agents.manage'], previousWorkspaceIds: ['12', '13'], workspaceIds: [12, 13] }]);
   const authenticated = await service.authenticate('Bearer astm_existing-secret');
   assert.deepEqual(authenticated.scopes, ['agents.manage']);
   await assert.rejects(service.withScope(authenticated, 12, 'agents.read', async () => 'unreachable'), /does not grant/);
   credential.revoked = true;
   await assert.rejects(service.updateCredentialScopes(3, 7, { scopes: ['agents.read'] }), /不存在或已撤销/);
+});
+
+test('all-workspace and wildcard scopes remain dynamic and still require current workspace permissions', async () => {
+  const writes = [];
+  let permissions = ['agent_config.read'];
+  const db = { platformQuery: async (sql, values) => {
+    writes.push({ sql, values });
+    if (sql.includes('SELECT w.id::int AS id FROM workspaces w')) return { rows: [{ id: 12 }, { id: 13 }] };
+    if (sql.includes('FROM workspaces w')) return { rows: [{ id: Number(values[1]), role: 'member', permission_codes: permissions }] };
+    if (sql.includes('SELECT code FROM permissions')) return { rows: [{ code: 'agent_config.read' }, { code: 'agent_config.manage' }] };
+    if (sql.includes('INSERT INTO system_mcp_credentials')) return { rows: [{ id: 8 }] };
+    return { rows: [], rowCount: 1 };
+  }};
+  const service = new SystemMcpService(db, {}, {}, {});
+  const created = await service.createCredential(3, { name: 'All', workspaceIds: [0], scopes: ['*'] });
+  const insert = writes.find(({ sql }) => sql.includes('INSERT INTO system_mcp_credentials'));
+  assert.deepEqual(insert.values[3], [0]);
+  assert.deepEqual(insert.values[4], ['*']);
+  const credential = { adminId: 3, workspaceIds: [0], scopes: ['*'] };
+  assert.equal(await service.withScope(credential, 13, 'agents.read', async () => 'allowed'), 'allowed');
+  permissions = [];
+  await assert.rejects(service.withScope(credential, 13, 'agents.read', async () => 'unreachable'), /permission was removed/);
+  await assert.rejects(service.createCredential(3, { name: 'Invalid', workspaceIds: [0, 12], scopes: ['*'] }), /全部工作区/);
+});
+
+test('workspace list tool data is limited by credential scope and dynamically accessible memberships', async () => {
+  const db = { platformQuery: async () => ({ rows: [{ id: 12, name: 'A' }, { id: 13, name: 'B' }] }) };
+  const service = new SystemMcpService(db, {}, {}, {});
+  assert.deepEqual(await service.listWorkspaces({ adminId: 3, workspaceIds: [12], scopes: ['workspaces.read'] }), [{ id: 12, name: 'A' }]);
+  assert.deepEqual(await service.listWorkspaces({ adminId: 3, workspaceIds: [0], scopes: ['*'] }), [{ id: 12, name: 'A' }, { id: 13, name: 'B' }]);
+  await assert.rejects(service.listWorkspaces({ adminId: 3, workspaceIds: [12], scopes: ['agents.read'] }), /workspaces.read/);
+});
+
+test('execution records use bounded pagination, allowlisted context, and recording policy hides conversation content', async () => {
+  const sqlCalls = [];
+  const db = {
+    query: async (sql, values) => {
+      sqlCalls.push({ sql, values });
+      if (sql.includes('count(*)')) return { rows: [{ total: 21 }] };
+      if (sql.includes('FROM chat_traces WHERE id=$1')) return { rows: [{ id: '00000000-0000-4000-8000-000000000001', conversationId: null, question: 'private', finalAnswer: 'private answer', status: 'failed', errorCode: 'answer_failed', contextSnapshot: { executionInput: { question: 'secret prompt' }, executionSteps: [{ name: 'safe', arguments: 'private args' }] } }] };
+      return { rows: [] };
+    },
+    platformQuery: async () => ({ rows: [{ auditEnabled: true, conversationContentEnabled: false, traceEnabled: true, usageEnabled: true }] }),
+  };
+  const service = new SystemMcpService(db, {}, {}, {});
+  const page = await service.executionList({ agentId: 4, conversationId: '00000000-0000-4000-8000-000000000002', status: 'failed', from: '2026-01-01T00:00:00.000Z', page: 2, pageSize: 5 });
+  assert.equal(page.total, 21);
+  assert.equal(page.page, 2);
+  assert.equal(sqlCalls[0].values.at(-2), 5);
+  assert.equal(sqlCalls[0].values.at(-1), 5);
+  assert.match(sqlCalls[0].sql, /workspace_id = \$1/);
+  assert.match(sqlCalls[0].sql, /conversation_id = \$3::uuid/);
+  const detail = await service.executionDetail('00000000-0000-4000-8000-000000000001');
+  assert.equal(detail.question, null);
+  assert.equal(detail.finalAnswer, null);
+  assert.equal(JSON.stringify(detail).includes('secret prompt'), false);
+  assert.equal(JSON.stringify(detail).includes('private args'), false);
+});
+
+test('Agent profile reports missing associations without returning Prompt bodies or model credentials', async () => {
+  const agent = {
+    get: async () => ({ id: 9, key: 'assistant', name: 'Assistant', kind: 'agent', enabled: true, currentVersionId: 30,
+      versions: [{ id: 30, version: 10, status: 'published', config: { promptVersionId: 4, modelPlanVersionId: 5, embeddingPlanVersionId: null, retrieval: { retrievalMode: 'fulltext', topK: 5 }, toolVersionIds: [11], skillVersionIds: [12], knowledgeBaseIds: [6], collaboration: null, executionLimits: { maxModelCalls: 20 }, businessPrompt: 'PRIVATE PROMPT' } }] }),
+  };
+  const db = { query: async (sql) => {
+    if (sql.includes('FROM prompt_versions')) return { rows: [{ versionId: 4, version: 2, status: 'published', name: 'Prompt' }] };
+    if (sql.includes('FROM model_plan_versions')) return { rows: [{ versionId: 5, version: 3, status: 'published', name: 'Model Plan' }] };
+    if (sql.includes('FROM agent_resource_versions')) return { rows: [] };
+    if (sql.includes('FROM knowledge_bases')) return { rows: [{ id: 6, name: 'KB', enabled: true, archived_at: null }] };
+    return { rows: [] };
+  }};
+  const service = new SystemMcpService(db, agent, {}, {});
+  const profile = await service.agentConfigurationProfile(9);
+  assert.equal(profile.version.number, 10);
+  assert.equal(profile.profile.prompt.status, 'ok');
+  assert.equal(profile.profile.model.name, 'Model Plan');
+  assert.deepEqual(profile.issues.map(issue => issue.status), ['missing', 'missing']);
+  assert.equal(JSON.stringify(profile).includes('PRIVATE PROMPT'), false);
 });
 
 test('required security audit cannot be disabled through recording policy updates', async () => {

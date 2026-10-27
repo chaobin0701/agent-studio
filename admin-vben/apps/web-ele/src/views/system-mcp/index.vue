@@ -33,7 +33,9 @@ const rows = ref<Credential[]>([]);
 const loading = ref(false), error = ref(""), formDialog = ref(false), tokenDialog = ref(false);
 const saving = ref(false), savingPolicy = ref(false), token = ref("");
 const editing = ref<Credential>();
-const form = ref({ name: "", workspaceId: undefined as number | undefined, scopes: ["agents.read"] as string[], expiresDays: 90, permanent: false });
+const editingContext = computed(() => editing.value ? `${editing.value.name} · ${workspaceNames(editing.value.workspaceIds)} · ${formatExpiry(editing.value.expiresAt)}` : "");
+const ALL_WORKSPACES = 0;
+const form = ref({ name: "", workspaceIds: [] as number[], scopes: ["agents.read"] as string[], expiresDays: 90, permanent: false });
 const policy = ref<RecordingPolicy>({ auditEnabled: true, conversationContentEnabled: false, traceEnabled: true, usageEnabled: true });
 const scopeGroups = [
   { name: "Agent", options: [{ label: "读取", value: "agents.read" }, { label: "管理", value: "agents.manage" }] },
@@ -43,9 +45,10 @@ const scopeGroups = [
   { name: "知识库", options: [{ label: "读取", value: "knowledge.read" }, { label: "管理", value: "knowledge.manage" }] },
   { name: "记录策略", options: [{ label: "读取", value: "recording.read" }, { label: "管理", value: "recording.manage" }] },
   { name: "审计记录", options: [{ label: "读取", value: "audit.read" }] },
+  { name: "工作区", options: [{ label: "读取", value: "workspaces.read" }] },
 ];
 const scopeOptions = scopeGroups.flatMap((group) => group.options.map((option) => ({ value: option.value, label: `${group.name} ${option.label}` })));
-const allScopesSelected = computed(() => form.value.scopes.length === scopeOptions.length);
+const allScopesSelected = computed(() => form.value.scopes.includes("*"));
 async function load() {
   loading.value = true; error.value = "";
   try {
@@ -58,12 +61,12 @@ async function load() {
 }
 function openCreate() {
   editing.value = undefined;
-  form.value = { name: "", workspaceId: workspace.id, scopes: ["agents.read"], expiresDays: 90, permanent: false };
+  form.value = { name: "", workspaceIds: workspace.id ? [workspace.id] : [], scopes: ["agents.read"], expiresDays: 90, permanent: false };
   formDialog.value = true;
 }
 function openEdit(row: Credential) {
   editing.value = row;
-  form.value = { name: row.name, workspaceId: Number(row.workspaceIds[0]), scopes: [...row.scopes], expiresDays: 90, permanent: !row.expiresAt };
+  form.value = { name: row.name, workspaceIds: row.workspaceIds.map(Number), scopes: [...row.scopes], expiresDays: 90, permanent: !row.expiresAt };
   formDialog.value = true;
 }
 async function saveCredential() {
@@ -71,12 +74,12 @@ async function saveCredential() {
   saving.value = true;
   try {
     if (editing.value) {
-      await api.patch(`/system-mcp/credentials/${editing.value.id}/scopes`, { scopes: form.value.scopes });
-      ElMessage.success("访问范围已更新，后续请求立即生效");
+      await api.patch(`/system-mcp/credentials/${editing.value.id}/scopes`, { scopes: form.value.scopes, workspaceIds: form.value.workspaceIds });
+      ElMessage.success("工作区和访问范围已更新，后续请求立即生效");
     } else {
       const expiresAt = form.value.permanent ? undefined : new Date(Date.now() + form.value.expiresDays * 86400000).toISOString();
       const result = await api.post<{ token: string }>("/system-mcp/credentials", {
-        name: form.value.name, workspaceIds: [form.value.workspaceId], scopes: form.value.scopes,
+        name: form.value.name, workspaceIds: form.value.workspaceIds, scopes: form.value.scopes,
         ...(expiresAt ? { expiresAt } : {}),
       });
       token.value = result.token;
@@ -87,8 +90,9 @@ async function saveCredential() {
   } catch (e: any) { ElMessage.error(e.response?.data?.message ?? "凭证保存失败，请检查账号对工作区的权限"); }
   finally { saving.value = false; }
 }
-function selectAllScopes() { form.value.scopes = scopeOptions.map((scope) => scope.value); }
+function selectAllScopes() { form.value.scopes = ["*"]; }
 function invertScopes() {
+  if (form.value.scopes.includes("*")) { form.value.scopes = []; return; }
   const selected = new Set(form.value.scopes);
   form.value.scopes = scopeOptions.filter((scope) => !selected.has(scope.value)).map((scope) => scope.value);
 }
@@ -96,8 +100,9 @@ function formatDate(value: string | null) {
   return value ? new Date(value).toLocaleString("zh-CN", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }) : "未使用";
 }
 function formatExpiry(value: string | null) { return value ? formatDate(value) : "永久有效"; }
-function scopeSummary(scopes: string[]) { return scopes.map((value) => scopeOptions.find((scope) => scope.value === value)?.label ?? value).join("、"); }
-function workspaceNames(ids: (number | string)[]) { return ids.map((id) => workspace.items.find((item) => item.id === Number(id))?.name ?? `工作区 ${id}`).join("、"); }
+function scopeSummary(scopes: string[]) { return scopes.includes("*") ? "全部权限（含未来新增工具）" : scopes.map((value) => scopeOptions.find((scope) => scope.value === value)?.label ?? value).join("、"); }
+function workspaceNames(ids: (number | string)[]) { return ids.some((id) => Number(id) === ALL_WORKSPACES) ? "全部工作区（动态）" : ids.map((id) => workspace.items.find((item) => item.id === Number(id))?.name ?? `工作区 ${id}`).join("、"); }
+function updateWorkspaceSelection(ids: number[]) { form.value.workspaceIds = ids.includes(ALL_WORKSPACES) ? [ALL_WORKSPACES] : ids; }
 function status(row: Credential) {
   if (row.revokedAt) return { label: "已撤销", type: "info" as const };
   if (row.expiresAt && new Date(row.expiresAt).getTime() <= Date.now()) return { label: "已过期", type: "warning" as const };
@@ -171,18 +176,24 @@ onMounted(async () => { await workspace.initialize(); await load(); });
       <ElForm label-position="top" @submit.prevent="saveCredential">
         <template v-if="!editing">
           <ElFormItem label="凭证名称"><ElInput v-model="form.name" placeholder="例如：内部 Agent 管理助手" maxlength="120" :disabled="saving" /></ElFormItem>
-          <div class="credential-fields">
-            <ElFormItem label="工作区"><ElSelect v-model="form.workspaceId" placeholder="选择工作区" :disabled="saving"><ElOption v-for="item in workspace.items" :key="item.id" :label="item.name" :value="item.id" :disabled="!item.enabled" /></ElSelect></ElFormItem>
+        </template>
+        <div class="credential-fields">
+          <ElFormItem label="工作区"><ElSelect :model-value="form.workspaceIds" multiple collapse-tags collapse-tags-tooltip placeholder="选择工作区" :disabled="saving" @update:model-value="updateWorkspaceSelection"><ElOption label="全部工作区（动态）" :value="ALL_WORKSPACES" /><ElOption v-for="item in workspace.items" :key="item.id" :label="item.name" :value="item.id" :disabled="!item.enabled" /></ElSelect></ElFormItem>
+          <template v-if="!editing">
             <ElFormItem label="有效期">
               <div class="expiry-controls"><ElSwitch v-model="form.permanent" active-text="永久有效" :disabled="saving" /><div v-if="!form.permanent" class="expiry-days"><ElInputNumber v-model="form.expiresDays" :min="1" :max="3650" controls-position="right" :disabled="saving" /><span>天</span></div></div>
             </ElFormItem>
-          </div>
-        </template>
-        <div v-else class="credential-context"><strong>{{ editing.name }}</strong><span>{{ workspaceNames(editing.workspaceIds) }} · {{ formatExpiry(editing.expiresAt) }}</span></div>
+          </template>
+        </div>
+        <div v-if="editing" class="credential-context"><strong>{{ editingContext }}</strong></div>
         <section class="scopes-section" aria-labelledby="scopes-heading">
           <div class="scope-toolbar">
-            <span id="scopes-heading">访问范围 <span class="muted">已选 {{ form.scopes.length }} / {{ scopeOptions.length }}</span></span>
+            <span id="scopes-heading">访问范围 <span class="muted">{{ form.scopes.includes("*") ? "全部权限" : `已选 ${form.scopes.length} / ${scopeOptions.length}` }}</span></span>
             <div><ElButton link type="primary" :disabled="allScopesSelected || saving" @click="selectAllScopes">全选</ElButton><ElButton link type="primary" :disabled="saving" @click="invertScopes">反选</ElButton></div>
+          </div>
+          <div class="all-scope-option">
+            <ElCheckbox :model-value="form.scopes.includes('*')" :disabled="!canManage || saving" @change="(checked: unknown) => { form.scopes = checked ? ['*'] : [] }">全部权限（含未来新增工具）</ElCheckbox>
+            <ElAlert v-if="form.scopes.includes('*')" class="all-scope-warning" title="高权限范围：每次调用仍会检查账号在目标工作区的实际权限。授权及变更会写入安全审计。" type="warning" :closable="false" />
           </div>
           <ElCheckboxGroup v-model="form.scopes" :disabled="!canManage || saving" class="scope-options">
             <div v-for="group in scopeGroups" :key="group.name" class="scope-row">
@@ -191,7 +202,7 @@ onMounted(async () => { await workspace.initialize(); await load(); });
           </ElCheckboxGroup>
         </section>
       </ElForm>
-      <template #footer><ElButton :disabled="saving" @click="formDialog = false">取消</ElButton><ElButton type="primary" :loading="saving" :disabled="!canManage || !form.name.trim() || !form.scopes.length || !form.workspaceId" @click="saveCredential">{{ editing ? '保存范围' : '创建凭证' }}</ElButton></template>
+      <template #footer><ElButton :disabled="saving" @click="formDialog = false">取消</ElButton><ElButton type="primary" :loading="saving" :disabled="!canManage || !form.name.trim() || !form.scopes.length || !form.workspaceIds.length" @click="saveCredential">{{ editing ? '保存范围' : '创建凭证' }}</ElButton></template>
     </ElDialog>
     <ElDialog v-model="tokenDialog" title="凭证已创建" width="min(560px, calc(100vw - 32px))" :close-on-click-modal="false" :close-on-press-escape="false" @closed="token = ''">
       <ElAlert title="令牌仅显示一次，请复制并妥善保存。" type="warning" :closable="false" />
@@ -213,6 +224,8 @@ onMounted(async () => { await workspace.initialize(); await load(); });
 .expiry-days .el-input-number { width: 110px; }
 .credential-context { display: flex; flex-direction: column; gap: 6px; margin-bottom: 24px; }
 .credential-context span, .muted { color: var(--el-text-color-secondary); font-size: 13px; }
+.all-scope-warning { margin: 8px 0 12px; }
+.all-scope-option { padding: 10px 12px; background: var(--el-fill-color-lighter); border-bottom: 1px solid var(--el-border-color-lighter); }
 .muted { margin-left: 8px; }
 .scope-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 8px; }
 .scope-options { border-top: 1px solid var(--el-border-color-lighter); }

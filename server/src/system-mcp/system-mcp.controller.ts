@@ -18,11 +18,17 @@ export class SystemMcpEndpointController {
     const credential = await this.service.authenticate(req.headers.authorization);
     const server = new McpServer({ name: "agent-studio-system", version: "1.0.0" });
     const workspace = z.number().int().positive().describe("Authorized workspace ID");
+    server.registerTool("workspaces_list", { description: "List the workspaces currently accessible to this MCP account.", inputSchema: {} }, async () => ({
+      content: [{ type: "text", text: JSON.stringify(await this.service.listWorkspaces(credential)) }],
+    }));
     server.registerTool("agents_list", { description: "List Agent names, versions and configuration references.", inputSchema: { workspace_id: workspace } }, async ({ workspace_id }) => ({
       content: [{ type: "text", text: JSON.stringify(await this.service.withScope(credential, workspace_id, "agents.read", () => this.service.listAgents())) }],
     }));
     server.registerTool("agent_get", { description: "Read an Agent configuration snapshot; prompt bodies and credentials are excluded.", inputSchema: { workspace_id: workspace, agent_id: z.number().int().positive() } }, async ({ workspace_id, agent_id }) => ({
       content: [{ type: "text", text: JSON.stringify(await this.service.withScope(credential, workspace_id, "agents.read", () => this.service.getAgent(agent_id))) }],
+    }));
+    server.registerTool("agent_configuration_profile", { description: "Summarize published Agent configuration and diagnose missing, disabled or unpublished associations without Prompt bodies or credentials.", inputSchema: { workspace_id: workspace, agent_id: z.number().int().positive() } }, async ({ workspace_id, agent_id }) => ({
+      content: [{ type: "text", text: JSON.stringify(await this.service.withScope(credential, workspace_id, "agents.read", () => this.service.agentConfigurationProfile(agent_id))) }],
     }));
     server.registerTool("resources_list", { description: "List Agent, Skill, Tool and collaboration resources without secret values or embedded content.", inputSchema: { workspace_id: workspace, kind: z.enum(["agent", "skill", "tool", "collaboration"]).optional() } }, async ({ workspace_id, kind }) => ({
       content: [{ type: "text", text: JSON.stringify(await this.service.withScope(credential, workspace_id, "agents.read", () => this.service.listResources(kind))) }],
@@ -41,6 +47,17 @@ export class SystemMcpEndpointController {
     }));
     server.registerTool("audit_logs_list", { description: "Read recent workspace audit records.", inputSchema: { workspace_id: workspace, limit: z.number().int().min(1).max(100).default(50) } }, async ({ workspace_id, limit }) => ({
       content: [{ type: "text", text: JSON.stringify(await this.service.withScope(credential, workspace_id, "audit.read", () => this.service.listAudit(workspace_id, limit))) }],
+    }));
+    const page = z.number().int().positive().max(100000).default(1);
+    const executionsPageSize = z.number().int().positive().max(100).default(20);
+    server.registerTool("executions_list", { description: "List safe, paginated Agent execution records by Agent, conversation, status and time in the selected workspace.", inputSchema: { workspace_id: workspace, agent_id: z.number().int().positive().optional(), conversation_id: z.string().uuid().optional(), status: z.enum(["completed", "failed"]).optional(), from: z.string().datetime().optional(), to: z.string().datetime().optional(), page, page_size: executionsPageSize } }, async ({ workspace_id, agent_id, conversation_id, status, from, to, page, page_size }) => ({
+      content: [{ type: "text", text: JSON.stringify(await this.service.withScope(credential, workspace_id, "recording.read", () => this.service.executionList({ agentId: agent_id, conversationId: conversation_id, status, from, to, page, pageSize: page_size }))) }],
+    }));
+    server.registerTool("execution_get", { description: "Read a safe execution detail including error and allowlisted Trace context.", inputSchema: { workspace_id: workspace, execution_id: z.string().uuid() } }, async ({ workspace_id, execution_id }) => ({
+      content: [{ type: "text", text: JSON.stringify(await this.service.withScope(credential, workspace_id, "recording.read", () => this.service.executionDetail(execution_id))) }],
+    }));
+    server.registerTool("execution_conversation", { description: "Read a paginated conversation timeline, respecting the recording content policy.", inputSchema: { workspace_id: workspace, execution_id: z.string().uuid(), page, page_size: z.number().int().positive().max(50).default(10) } }, async ({ workspace_id, execution_id, page, page_size }) => ({
+      content: [{ type: "text", text: JSON.stringify(await this.service.withScope(credential, workspace_id, "recording.read", () => this.service.executionConversation(execution_id, page, page_size))) }],
     }));
     server.registerTool("recording_policy_get", { description: "Read platform recording controls. Required security audit and core conversation history are always retained.", inputSchema: { workspace_id: workspace } }, async ({ workspace_id }) => ({
       content: [{ type: "text", text: JSON.stringify(await this.service.withScope(credential, workspace_id, "recording.read", () => this.service.getRecordingPolicy(credential.adminId))) }],
