@@ -14,6 +14,10 @@ export type McpDefinition = {
   description?: string;
   inputSchema: Record<string, unknown>;
   outputSchema?: Record<string, unknown>;
+  annotations?: {
+    readOnlyHint?: boolean;
+    destructiveHint?: boolean;
+  };
 };
 export function contractHash(value: unknown): string {
   const ordered = (input: any): any =>
@@ -121,6 +125,10 @@ export async function discoverMcp(
         name: tool.name,
         description: (tool.description ?? tool.name).slice(0, 2000),
         inputSchema: tool.inputSchema as Record<string, unknown>,
+        ...(tool.annotations ? { annotations: {
+          ...(typeof tool.annotations.readOnlyHint === "boolean" ? { readOnlyHint: tool.annotations.readOnlyHint } : {}),
+          ...(typeof tool.annotations.destructiveHint === "boolean" ? { destructiveHint: tool.annotations.destructiveHint } : {}),
+        } } : {}),
         ...(tool.outputSchema
           ? { outputSchema: tool.outputSchema as Record<string, unknown> }
           : {}),

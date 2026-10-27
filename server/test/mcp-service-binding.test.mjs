@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { mcpServiceBindings } from '../dist/tool-management/mcp-service-binding.js';
 import { ToolManagementService } from '../dist/tool-management/tool-management.service.js';
 const schema={type:'object',properties:{}};
-const version={id:4,serverId:1,name:'Robot MCP',key:'robot',version:2,enabled:true,config:{url:'https://example.test/mcp',timeoutMs:15000,credentialId:null},catalog:[{name:'users',inputSchema:schema},{name:'records',inputSchema:schema}]};
+const version={id:4,serverId:1,name:'Robot MCP',key:'robot',version:2,enabled:true,config:{url:'https://example.test/mcp',timeoutMs:15000,credentialId:null},catalog:[{name:'users',inputSchema:schema,annotations:{readOnlyHint:true}},{name:'records',inputSchema:schema,annotations:{destructiveHint:true}}]};
 test('one connection version is one choice; readiness requires the complete catalog and keeps old version identities',()=>{
   const rows=[{id:11,version:1,target:'users',mcpVersionId:4},{id:12,version:2,target:'users',mcpVersionId:4},{id:13,version:1,target:'records',mcpVersionId:4}];
   const [complete]=mcpServiceBindings([version],rows);
@@ -33,10 +33,12 @@ function fixture({latest=4,existing}={}) {
   service.connectionVersion=async()=>version;
   return{service,configs,calls};
 }
-test('whole-service publication creates immutable adapters with approval on and never calls a remote method',async()=>{
+test('whole-service publication honors MCP annotations and defaults to no approval when annotation is absent',async()=>{
   const f=fixture();const result=await f.service.publishService(1,1,{versionId:4});
   assert.deepEqual(result.toolVersionIds,[100,101]);assert.equal(f.configs.length,2);
-  for(const config of f.configs){assert.equal(config.type,'mcp');assert.equal(config.requiresApproval,true);assert.equal(config.readOnly,false);assert.equal(config.maxRetries,0);}
+  assert.equal(f.configs[0].type,'mcp');assert.equal(f.configs[0].requiresApproval,false);assert.equal(f.configs[0].readOnly,true);assert.equal(f.configs[0].maxRetries,0);
+  assert.equal(f.configs[1].type,'mcp');assert.equal(f.configs[1].requiresApproval,true);assert.equal(f.configs[1].readOnly,false);assert.equal(f.configs[1].maxRetries,0);
+  const unmarked=fixture();unmarked.service.connectionVersion=async()=>({...version,catalog:[{name:'unknown',inputSchema:schema}]});await unmarked.service.publishService(1,1,{versionId:4});assert.equal(unmarked.configs[0].requiresApproval,false);assert.equal(unmarked.configs[0].readOnly,false);
 });
 test('whole-service publication preserves existing published policy and refuses a stale connection version',async()=>{
   const ready=fixture({existing:22});await ready.service.publishService(1,1,{versionId:4});assert.equal(ready.configs.length,0);

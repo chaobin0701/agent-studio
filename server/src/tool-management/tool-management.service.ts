@@ -535,7 +535,7 @@ export class ToolManagementService {
         if(existing) {toolVersionIds.push(existing.id);continue;}
         const config=toolSchema.parse({type:'mcp',target:definition.name,mcpVersionId:version.id,
           description:(definition.description?.trim()||definition.name).slice(0,2000),parameters:definition.inputSchema,
-          ...(definition.outputSchema?{outputSchema:definition.outputSchema}:{}),readOnly:false,requiresApproval:true,maxRetries:0,timeoutMs:version.config.timeoutMs});
+          ...(definition.outputSchema?{outputSchema:definition.outputSchema}:{}),readOnly:definition.annotations?.readOnlyHint === true,requiresApproval:definition.annotations?.readOnlyHint !== true && definition.annotations?.destructiveHint === true,maxRetries:0,timeoutMs:version.config.timeoutMs});
         const resource=(await c.query<{id:number;archived_at:unknown;deleted_at:unknown;enabled:boolean}>(`INSERT INTO agent_resources(kind,resource_key,name) VALUES('tool',$1,$2)
           ON CONFLICT(workspace_id,kind,resource_key) DO UPDATE SET resource_key=EXCLUDED.resource_key RETURNING id::int,archived_at,deleted_at,enabled`,[mcpResourceKey(version.key,definition.name),`${version.name} · ${definition.name}`.slice(0,160)])).rows[0];
         if(resource.archived_at || resource.deleted_at || !resource.enabled) throw new ConflictException("关联能力曾被停用或移除，请先恢复后再发布");
@@ -576,8 +576,8 @@ export class ToolManagementService {
       description: definition.description ?? definition.name,
       parameters: definition.inputSchema,
       outputSchema: definition.outputSchema,
-      readOnly: false,
-      requiresApproval: true,
+      readOnly: definition.annotations?.readOnlyHint === true,
+      requiresApproval: definition.annotations?.readOnlyHint !== true && definition.annotations?.destructiveHint === true,
       maxRetries: 0,
       timeoutMs: version.config.timeoutMs,
     });
