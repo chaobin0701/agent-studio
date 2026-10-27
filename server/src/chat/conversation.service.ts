@@ -67,6 +67,7 @@ import {
 } from "../prompts/prompt-runtime.service";
 import { InteractionService } from "../interactions/interaction.service";
 import { InteractionSuspension, type JsonObject,type PublicInteraction } from "../interactions/contracts";
+import { DEFAULT_RECORDING_POLICY, RecordingPolicyService } from "../system-mcp/recording-policy.service";
 
 const COOKIE_NAME = "agent_studio_visitor";
 const COOKIE_AGE_MS = 180 * 24 * 60 * 60 * 1000;
@@ -146,6 +147,7 @@ export class ConversationService {
     @Optional() private readonly tracing?: ExecutionTracingService,
     @Optional() private readonly artifacts?: ExecutionArtifactService,
     @Optional() private readonly interactions?:InteractionService,
+    @Optional() private readonly recordingPolicy?: RecordingPolicyService,
   ) {}
 
   async session(request: Request, response: Response): Promise<string> {
@@ -805,6 +807,7 @@ export class ConversationService {
     signal?: AbortSignal,
   ): Promise<void> {
     signal?.throwIfAborted();
+    const policy = await this.recordingPolicy?.current() ?? DEFAULT_RECORDING_POLICY;
     if (
       run.fileOutputs?.length ||
       run.result.artifacts?.some((file) => file.kind === "execution_file")
@@ -861,7 +864,7 @@ export class ConversationService {
                 updated_at = now() WHERE id = $1`,
         [conversationId, question],
       );
-      await client.query(
+      if (policy.traceEnabled) await client.query(
         `INSERT INTO chat_traces
           (id, conversation_id, user_message_id, question, context_snapshot, model, raw_model_output,
            final_answer, refused, status, input_tokens, output_tokens, total_tokens, duration_ms)
@@ -870,15 +873,15 @@ export class ConversationService {
           run.traceId ?? randomUUID(),
           conversationId,
           user.rows[0].id,
-          question,
-          JSON.stringify(run.contextSnapshot),
+          policy.conversationContentEnabled ? question : "",
+          JSON.stringify(policy.conversationContentEnabled ? run.contextSnapshot : safeTraceMetadata(run.contextSnapshot as any)),
           run.rawModelOutput ? this.llm.model : null,
-          run.rawModelOutput,
-          run.result.answer,
+          policy.conversationContentEnabled ? run.rawModelOutput : null,
+          policy.conversationContentEnabled ? run.result.answer : null,
           run.result.refused,
-          run.inputTokens,
-          run.outputTokens,
-          run.totalTokens,
+          policy.usageEnabled ? run.inputTokens : null,
+          policy.usageEnabled ? run.outputTokens : null,
+          policy.usageEnabled ? run.totalTokens : null,
           durationMs,
         ],
       );
@@ -1014,6 +1017,8 @@ export class ConversationService {
     totalTokens: number | null;
     durationMs: number;
   }): Promise<void> {
+    const policy = await this.recordingPolicy?.current() ?? DEFAULT_RECORDING_POLICY;
+    if (!policy.traceEnabled) return;
     await this.database.query(
       `INSERT INTO chat_traces
         (id, conversation_id, user_message_id, question, context_snapshot, model, raw_model_output,
@@ -1023,17 +1028,17 @@ export class ConversationService {
         trace.id,
         trace.conversationId,
         trace.userMessageId,
-        trace.question,
-        JSON.stringify(trace.contextSnapshot),
+        policy.conversationContentEnabled ? trace.question : "",
+        JSON.stringify(policy.conversationContentEnabled ? trace.contextSnapshot : safeTraceMetadata(trace.contextSnapshot as any)),
         trace.model,
-        trace.rawModelOutput,
-        trace.finalAnswer,
+        policy.conversationContentEnabled ? trace.rawModelOutput : null,
+        policy.conversationContentEnabled ? trace.finalAnswer : null,
         trace.refused,
         trace.status,
         trace.errorCode,
-        trace.inputTokens,
-        trace.outputTokens,
-        trace.totalTokens,
+        policy.usageEnabled ? trace.inputTokens : null,
+        policy.usageEnabled ? trace.outputTokens : null,
+        policy.usageEnabled ? trace.totalTokens : null,
         trace.durationMs,
       ],
     );
@@ -1046,6 +1051,7 @@ export class ConversationService {
     promptSnapshot?: PromptRuntimeSnapshot,
     expectedScope?: string,
   ): Promise<void> {
+    const recordPolicy = await this.recordingPolicy?.current() ?? DEFAULT_RECORDING_POLICY;
     const snapshot = configurationSnapshot ?? (await this.settings?.snapshot());
     const limits = memoryLimitsForContextWindow(
       Number.isFinite(this.llm.contextWindowTokens)
@@ -1145,7 +1151,7 @@ export class ConversationService {
             ],
           );
           if (!update.rowCount) return;
-          await client.query(
+          if (recordPolicy.traceEnabled) await client.query(
             `INSERT INTO chat_traces
             (id, kind, conversation_id, question, context_snapshot, model, raw_model_output,
              final_answer, status, input_tokens, output_tokens, total_tokens, duration_ms)
@@ -1153,20 +1159,20 @@ export class ConversationService {
             [
               summaryTraceId,
               conversationId,
-              JSON.stringify(traceContext),
+              JSON.stringify(recordPolicy.conversationContentEnabled ? traceContext : safeTraceMetadata(traceContext as any)),
               result.model,
-              result.content,
-              result.content.slice(0, limits.summaryMaxChars),
-              result.inputTokens,
-              result.outputTokens,
-              result.totalTokens,
+              recordPolicy.conversationContentEnabled ? result.content : null,
+              recordPolicy.conversationContentEnabled ? result.content.slice(0, limits.summaryMaxChars) : null,
+              recordPolicy.usageEnabled ? result.inputTokens : null,
+              recordPolicy.usageEnabled ? result.outputTokens : null,
+              recordPolicy.usageEnabled ? result.totalTokens : null,
               Date.now() - started,
             ],
           );
         });
       } catch (error) {
         annotateExecution({ status: "failed", errorCode: "summary_failed" });
-        await this.database
+        if (recordPolicy.traceEnabled) await this.database
           .query(
             `INSERT INTO chat_traces
           (id, kind, conversation_id, question, context_snapshot, model, status, error_code,
@@ -1175,7 +1181,7 @@ export class ConversationService {
             [
               summaryTraceId,
               conversationId,
-              JSON.stringify({
+              JSON.stringify(recordPolicy.conversationContentEnabled ? {
                 ...contextSnapshot,
                 ...(phoenix ? { phoenix } : {}),
                 ...(promptSnapshot && this.promptRuntime
@@ -1184,11 +1190,11 @@ export class ConversationService {
                         this.promptRuntime.metadata(promptSnapshot),
                     }
                   : {}),
-              }),
+              } : safeTraceMetadata(contextSnapshot as any)),
               this.llm.model,
-              error instanceof ModelFailure ? error.usage.inputTokens : null,
-              error instanceof ModelFailure ? error.usage.outputTokens : null,
-              error instanceof ModelFailure ? error.usage.totalTokens : null,
+              recordPolicy.usageEnabled && error instanceof ModelFailure ? error.usage.inputTokens : null,
+              recordPolicy.usageEnabled && error instanceof ModelFailure ? error.usage.outputTokens : null,
+              recordPolicy.usageEnabled && error instanceof ModelFailure ? error.usage.totalTokens : null,
               Date.now() - started,
             ],
           )

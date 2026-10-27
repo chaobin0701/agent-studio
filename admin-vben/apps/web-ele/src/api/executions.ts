@@ -159,6 +159,26 @@ export interface ExecutionRecord {
   createdAt: string;
 }
 export type ExecutionDetail = ExecutionRecord & { execution: ExecutionView };
+export interface ConversationTurn {
+  key: string;
+  userMessageId: number | null;
+  traceId: string | null;
+  question: string;
+  finalAnswer: string | null;
+  refused: boolean | null;
+  status: string;
+  errorCode: string | null;
+  totalTokens: number | null;
+  durationMs: number | null;
+  createdAt: string;
+}
+export interface ExecutionConversation {
+  conversation: { id: string; title: string; createdAt: string; updatedAt: string } | null;
+  items: ConversationTurn[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
 export const executionsApi = {
   list: (query: URLSearchParams) =>
     managementApi.get<{ items: ExecutionRecord[]; total: number }>(
@@ -166,6 +186,10 @@ export const executionsApi = {
     ),
   detail: (id: string) =>
     managementApi.get<ExecutionDetail>(`/executions/${encodeURIComponent(id)}`),
+  conversation: (id: string, page?: number) =>
+    managementApi.get<ExecutionConversation>(
+      `/executions/${encodeURIComponent(id)}/conversation${page ? `?page=${page}` : ""}`,
+    ),
   external: (id: string) =>
     managementApi.get<{
       available: boolean;

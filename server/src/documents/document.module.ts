@@ -17,6 +17,6 @@ import { EmbeddingProfileController } from './embedding-profile.controller';
   imports: [AdminModule],
   controllers: [DocumentController, SearchController, KnowledgeBaseController, EmbeddingProfileController],
   providers: [DocumentQueueService, DocumentService, EmbeddingService, SearchService, KnowledgeBaseService, KnowledgeIndexService, EmbeddingProfileService, VersionSearchService],
-  exports: [SearchService],
+  exports: [SearchService, KnowledgeBaseService, KnowledgeIndexService],
 })
 export class DocumentModule {}

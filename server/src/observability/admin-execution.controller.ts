@@ -85,6 +85,62 @@ export class AdminExecutionController {
     return { ...trace, execution: executionContextView(contextSnapshot) };
   }
 
+  @Get(":id/conversation")
+  @RequirePermission("conversations.read")
+  async conversation(
+    @Param("id", ParseUUIDPipe) id: string,
+    @Query("page") page?: string,
+    @Query("pageSize") pageSize?: string,
+  ) {
+    const requestedPage = page === undefined ? undefined : integer(page, 1, 100000);
+    const size = integer(pageSize, 10, 50);
+    const trace = await this.find(id);
+    if (!trace.conversationId) return { conversation: null, items: [], total: 0, page: 1, pageSize: size };
+    const conversation = (await this.database.query(
+      `SELECT id, title, created_at AS "createdAt", updated_at AS "updatedAt"
+       FROM conversations WHERE id=$1`, [trace.conversationId],
+    )).rows[0];
+    if (!conversation) throw new NotFoundException("会话不存在");
+
+    // Read the saved conversation, not raw runtime state. Failed attempts without
+    // saved messages stay in the timeline; turns without a Trace remain readable.
+    const timeline = `WITH timeline AS (
+      SELECT 'message:' || lpad(m.id::text, 20, '0') AS key, m.id::int AS "userMessageId",
+             m.content AS question, a.content AS "finalAnswer", a.refused,
+             t.id AS "traceId", COALESCE(t.status, 'completed') AS status,
+             t.error_code AS "errorCode", t.total_tokens AS "totalTokens",
+             t.duration_ms AS "durationMs", m.created_at AS "createdAt"
+      FROM conversation_messages m
+      LEFT JOIN LATERAL (
+        SELECT role, content, refused FROM conversation_messages
+        WHERE conversation_id=m.conversation_id AND id>m.id ORDER BY id LIMIT 1
+      ) a ON a.role='assistant'
+      LEFT JOIN LATERAL (
+        SELECT id, status, error_code, total_tokens, duration_ms FROM chat_traces
+        WHERE conversation_id=m.conversation_id AND user_message_id=m.id AND kind='answer'
+        ORDER BY created_at DESC, id DESC LIMIT 1
+      ) t ON true
+      WHERE m.conversation_id=$1 AND m.role='user'
+      UNION ALL
+      SELECT 'trace:' || id, NULL::int, question, final_answer, refused, id,
+             status, error_code, total_tokens, duration_ms, created_at
+      FROM chat_traces
+      WHERE conversation_id=$1 AND kind='answer' AND status='failed' AND user_message_id IS NULL
+    )`;
+    const count = (await this.database.query<{ total: number; beforeCurrent: number }>(
+      `${timeline} SELECT count(*)::int AS total,
+        count(*) FILTER (WHERE ("createdAt", key) < (
+          SELECT "createdAt", key FROM timeline WHERE "traceId"=$2
+        ))::int AS "beforeCurrent" FROM timeline`, [trace.conversationId, id],
+    )).rows[0];
+    const currentPage = requestedPage ?? Math.floor((count?.beforeCurrent ?? 0) / size) + 1;
+    const items = await this.database.query(
+      `${timeline} SELECT * FROM timeline ORDER BY "createdAt", key LIMIT $2 OFFSET $3`,
+      [trace.conversationId, size, (currentPage - 1) * size],
+    );
+    return { conversation, items: items.rows, total: count?.total ?? 0, page: currentPage, pageSize: size };
+  }
+
   @Get(":id/phoenix")
   @RequirePermission("observability.external.read")
   async external(

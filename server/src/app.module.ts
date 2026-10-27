@@ -9,6 +9,7 @@ import { MessageBusModule } from "./message-bus/message-bus.module";
 import { PromptsModule } from "./prompts/prompts.module";
 import { ExecutionModule } from "./executions/execution.module";
 import { ChatbotModule } from './chatbot/chatbot.module';
+import { SystemMcpModule } from './system-mcp/system-mcp.module';
 
 @Module({
   imports: [
@@ -21,6 +22,7 @@ import { ChatbotModule } from './chatbot/chatbot.module';
     PromptsModule,
     ExecutionModule,
     ChatbotModule,
+    SystemMcpModule,
   ],
   controllers: [HealthController],
 })

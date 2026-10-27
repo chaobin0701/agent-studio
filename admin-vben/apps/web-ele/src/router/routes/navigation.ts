@@ -31,7 +31,7 @@ export function groupManagementRoutes(
       path: "/settings",
       title: "设置",
       icon: "lucide:settings",
-      paths: ["/workspaces", "/system/users", "/system/roles"],
+      paths: ["/workspaces", "/system/users", "/system/roles", "/system-mcp"],
     },
   ];
   const assigned = new Set<RouteRecordRaw>();

@@ -13,6 +13,8 @@ import {
   ElTable,
   ElTableColumn,
   ElTag,
+  ElTabs,
+  ElTabPane,
   ElCollapse,
   ElCollapseItem,
 } from "element-plus";
@@ -24,6 +26,7 @@ import { safePhoenixLink } from "#/api/phoenix-link";
 import { useWorkspaceStore } from "#/store/workspace";
 import ExecutionTree from "./ExecutionTree.vue";
 import FileArtifacts from "./FileArtifacts.vue";
+import ConversationHistory from "./ConversationHistory.vue";
 
 const route = useRoute(),
   router = useRouter(),
@@ -106,6 +109,15 @@ const entryAgentName = computed(() => {
   );
 });
 const value = (item: number | null | undefined) => item ?? "—";
+const activeView = computed({
+  get: () =>
+    route.query.view === "conversation" && detail.value?.conversationId
+      ? "conversation"
+      : "execution",
+  set: (view: string) => {
+    void router.replace({ query: { ...route.query, view } });
+  },
+});
 </script>
 <template>
   <Page>
@@ -167,155 +179,166 @@ const value = (item: number | null | undefined) => item ?? "—";
             }}</ElDescriptionsItem>
           </ElDescriptions>
         </PagePanel>
-        <div class="grid gap-4 lg:grid-cols-2">
-          <PagePanel
-            ><h2 class="mb-3 font-medium">任务输入</h2>
-            <p class="whitespace-pre-wrap break-words text-sm">
-              {{ detail.question }}
-            </p></PagePanel
-          ><PagePanel
-            ><h2 class="mb-3 font-medium">最终结果</h2>
-            <p class="whitespace-pre-wrap break-words text-sm">
-              {{ detail.finalAnswer || "此执行未生成最终结果。" }}
-            </p></PagePanel
-          >
-        </div>
-        <PagePanel><FileArtifacts :trace-id="detail.id" /></PagePanel>
-        <PagePanel
-          ><h2 class="mb-3 font-medium">执行过程</h2>
-          <ExecutionTree :execution="detail.execution"
-        /></PagePanel>
-        <PagePanel>
-          <ElCollapse>
-            <ElCollapseItem name="metadata" title="版本与技术信息">
-              <div class="space-y-4 pt-2">
-                <div class="flex flex-wrap items-center gap-2">
-                  <ElLink
-                    v-if="externalUrl && collectorPermission"
-                    :href="externalUrl"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    type="primary"
-                    >在 Phoenix 查看执行树</ElLink
-                  >
-                  <HelpTip
-                    long
-                    text="Phoenix 是本地部署的追踪服务，不向云端上传数据。仅记录版本、耗时、用量、重试及错误分类，不记录完整提示词、工具参数或文档正文。本地 Trace 和审计仍是业务依据。"
-                  />
-                </div>
-                <ElAlert
-                  v-if="externalMessage"
-                  :title="externalMessage"
-                  type="info"
-                  :closable="false"
-                />
-                <ElDescriptions :column="columns" border direction="vertical">
-                  <ElDescriptionsItem label="执行器"
-                    >{{
-                      engineLabels[detail.execution.executionEngine || ""] ||
-                      detail.execution.executionEngine ||
-                      "历史记录"
-                    }}
-                    ·
-                    {{
-                      detail.execution.graphVersion || "—"
-                    }}</ElDescriptionsItem
-                  >
-                  <ElDescriptionsItem label="Agent / 生效版本 ID"
-                    >{{ detail.execution.composition.agentId || "—" }} /
-                    {{
-                      detail.execution.composition.entryVersionId || "—"
-                    }}</ElDescriptionsItem
-                  >
-                  <ElDescriptionsItem label="错误分类">{{
-                    detail.errorCode || detail.execution.error.errorCode || "无"
-                  }}</ElDescriptionsItem>
-                  <ElDescriptionsItem
-                    v-if="detail.execution.outputContract?.mode"
-                    label="输出规范"
-                  >
-                    {{
-                      detail.execution.outputContract.mode === "json"
-                        ? "结构化 JSON"
-                        : "文本"
-                    }}
-                    ·
-                    {{
-                      detail.execution.outputContract.source === "agent"
-                        ? "Agent 版本配置"
-                        : detail.execution.outputContract.source === "request"
-                          ? "调用方配置"
-                          : "历史兼容"
-                    }}
-                    <div
-                      v-if="detail.execution.outputContract.schemaHash"
-                      class="break-all text-xs text-muted-foreground"
-                    >
-                      {{ detail.execution.outputContract.schemaHash }}
-                    </div>
-                  </ElDescriptionsItem>
-                  <ElDescriptionsItem label="本地 Trace ID">{{
-                    detail.id
-                  }}</ElDescriptionsItem
-                  ><ElDescriptionsItem label="执行入口 / Run ID"
-                    >{{
-                      detail.execution.entryPoint === "generic_run"
-                        ? "独立任务"
-                        : detail.execution.entryPoint === "agent_preview"
-                          ? "后台试运行"
-                          : detail.execution.entryPoint === "workflow_test"
-                            ? "专项流程测试"
-                            : "会话 / 渠道"
-                    }}
-                    / {{ detail.execution.runId || "—" }}</ElDescriptionsItem
-                  ><ElDescriptionsItem label="会话 ID">{{
-                    detail.conversationId || "无会话"
-                  }}</ElDescriptionsItem
-                  ><ElDescriptionsItem label="时间">{{
-                    new Date(detail.createdAt).toLocaleString()
-                  }}</ElDescriptionsItem>
-                </ElDescriptions>
-                <div>
-                  <h2 class="mb-3 font-medium">资源版本快照</h2>
-                  <ElTable
-                    :data="detail.execution.composition.agents"
-                    empty-text="此历史记录未保存 Agent 组合快照"
-                    ><ElTableColumn
-                      prop="name"
-                      label="Agent"
-                      min-width="160"
-                    /><ElTableColumn
-                      prop="versionId"
-                      label="版本 ID"
-                      width="100"
-                    /><ElTableColumn
-                      prop="promptVersionId"
-                      label="Prompt 版本"
-                      width="120"
-                    /><ElTableColumn
-                      prop="modelPlanVersionId"
-                      label="模型方案版本"
-                      width="130"
-                    /><ElTableColumn
-                      prop="embeddingPlanVersionId"
-                      label="向量方案版本"
-                      width="130"
-                    /><ElTableColumn label="知识库索引" min-width="180"
-                      ><template #default="{ row }">{{
-                        row.knowledge
-                          .map(
-                            (kb: { id: number; indexVersionId: number }) =>
-                              `${kb.id} / ${kb.indexVersionId ?? "未就绪"}`,
-                          )
-                          .join("、") || "无"
-                      }}</template></ElTableColumn
-                    ></ElTable
-                  >
-                </div>
+        <ElTabs v-model="activeView">
+          <ElTabPane label="本次执行" name="execution">
+            <div class="space-y-4">
+              <div class="grid gap-4 lg:grid-cols-2">
+                <PagePanel
+                  ><h2 class="mb-3 font-medium">任务输入</h2>
+                  <p class="whitespace-pre-wrap break-words text-sm">
+                    {{ detail.question }}
+                  </p></PagePanel
+                ><PagePanel
+                  ><h2 class="mb-3 font-medium">最终结果</h2>
+                  <p class="whitespace-pre-wrap break-words text-sm">
+                    {{ detail.finalAnswer || "此执行未生成最终结果。" }}
+                  </p></PagePanel
+                >
               </div>
-            </ElCollapseItem>
-          </ElCollapse>
-        </PagePanel>
+              <PagePanel><FileArtifacts :trace-id="detail.id" /></PagePanel>
+              <PagePanel
+                ><h2 class="mb-3 font-medium">执行过程</h2>
+                <ExecutionTree :execution="detail.execution"
+              /></PagePanel>
+              <PagePanel>
+                <ElCollapse>
+                  <ElCollapseItem name="metadata" title="版本与技术信息">
+                    <div class="space-y-4 pt-2">
+                      <div class="flex flex-wrap items-center gap-2">
+                        <ElLink
+                          v-if="externalUrl && collectorPermission"
+                          :href="externalUrl"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          type="primary"
+                          >在 Phoenix 查看执行树</ElLink
+                        >
+                        <HelpTip
+                          long
+                          text="Phoenix 是本地部署的追踪服务，不向云端上传数据。仅记录版本、耗时、用量、重试及错误分类，不记录完整提示词、工具参数或文档正文。本地 Trace 和审计仍是业务依据。"
+                        />
+                      </div>
+                      <ElAlert
+                        v-if="externalMessage"
+                        :title="externalMessage"
+                        type="info"
+                        :closable="false"
+                      />
+                      <ElDescriptions :column="columns" border direction="vertical">
+                        <ElDescriptionsItem label="执行器"
+                          >{{
+                            engineLabels[detail.execution.executionEngine || ""] ||
+                            detail.execution.executionEngine ||
+                            "历史记录"
+                          }}
+                          ·
+                          {{
+                            detail.execution.graphVersion || "—"
+                          }}</ElDescriptionsItem
+                        >
+                        <ElDescriptionsItem label="Agent / 生效版本 ID"
+                          >{{ detail.execution.composition.agentId || "—" }} /
+                          {{
+                            detail.execution.composition.entryVersionId || "—"
+                          }}</ElDescriptionsItem
+                        >
+                        <ElDescriptionsItem label="错误分类">{{
+                          detail.errorCode || detail.execution.error.errorCode || "无"
+                        }}</ElDescriptionsItem>
+                        <ElDescriptionsItem
+                          v-if="detail.execution.outputContract?.mode"
+                          label="输出规范"
+                        >
+                          {{
+                            detail.execution.outputContract.mode === "json"
+                              ? "结构化 JSON"
+                              : "文本"
+                          }}
+                          ·
+                          {{
+                            detail.execution.outputContract.source === "agent"
+                              ? "Agent 版本配置"
+                              : detail.execution.outputContract.source === "request"
+                                ? "调用方配置"
+                                : "历史兼容"
+                          }}
+                          <div
+                            v-if="detail.execution.outputContract.schemaHash"
+                            class="break-all text-xs text-muted-foreground"
+                          >
+                            {{ detail.execution.outputContract.schemaHash }}
+                          </div>
+                        </ElDescriptionsItem>
+                        <ElDescriptionsItem label="本地 Trace ID">{{
+                          detail.id
+                        }}</ElDescriptionsItem
+                        ><ElDescriptionsItem label="执行入口 / Run ID"
+                          >{{
+                            detail.execution.entryPoint === "generic_run"
+                              ? "独立任务"
+                              : detail.execution.entryPoint === "agent_preview"
+                                ? "后台试运行"
+                                : detail.execution.entryPoint === "workflow_test"
+                                  ? "专项流程测试"
+                                  : "会话 / 渠道"
+                          }}
+                          / {{ detail.execution.runId || "—" }}</ElDescriptionsItem
+                        ><ElDescriptionsItem label="会话 ID">{{
+                          detail.conversationId || "无会话"
+                        }}</ElDescriptionsItem
+                        ><ElDescriptionsItem label="时间">{{
+                          new Date(detail.createdAt).toLocaleString()
+                        }}</ElDescriptionsItem>
+                      </ElDescriptions>
+                      <div>
+                        <h2 class="mb-3 font-medium">资源版本快照</h2>
+                        <ElTable
+                          :data="detail.execution.composition.agents"
+                          empty-text="此历史记录未保存 Agent 组合快照"
+                          ><ElTableColumn
+                            prop="name"
+                            label="Agent"
+                            min-width="160"
+                          /><ElTableColumn
+                            prop="versionId"
+                            label="版本 ID"
+                            width="100"
+                          /><ElTableColumn
+                            prop="promptVersionId"
+                            label="Prompt 版本"
+                            width="120"
+                          /><ElTableColumn
+                            prop="modelPlanVersionId"
+                            label="模型方案版本"
+                            width="130"
+                          /><ElTableColumn
+                            prop="embeddingPlanVersionId"
+                            label="向量方案版本"
+                            width="130"
+                          /><ElTableColumn label="知识库索引" min-width="180"
+                            ><template #default="{ row }">{{
+                              row.knowledge
+                                .map(
+                                  (kb: { id: number; indexVersionId: number }) =>
+                                    `${kb.id} / ${kb.indexVersionId ?? "未就绪"}`,
+                                )
+                                .join("、") || "无"
+                            }}</template></ElTableColumn
+                          ></ElTable
+                        >
+                      </div>
+                    </div>
+                  </ElCollapseItem>
+                </ElCollapse>
+              </PagePanel>
+            </div>
+          </ElTabPane>
+          <ElTabPane v-if="detail.conversationId" label="会话对话" name="conversation" lazy>
+            <PagePanel>
+              <ConversationHistory v-if="activeView === 'conversation'" :trace-id="detail.id" />
+            </PagePanel>
+          </ElTabPane>
+        </ElTabs>
       </template>
     </div>
   </Page>

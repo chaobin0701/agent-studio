@@ -142,7 +142,7 @@ const date = (value: string) => new Date(value).toLocaleString();
   <Page>
     <ManagementHeader
       title="运行记录"
-      description="查看任务结果与失败原因，按需展开调用过程"
+      description="查看任务结果、会话多轮对话与失败原因，按需展开调用过程"
     >
       <ElButton :loading="loading" @click="load">刷新</ElButton>
     </ManagementHeader>
@@ -267,6 +267,12 @@ const date = (value: string) => new Date(value).toLocaleString();
               date(row.createdAt)
             }}</template></ElTableColumn
           >
+          <ElTableColumn label="操作" width="110" fixed="right">
+            <template #default="{ row }">
+              <ElButton v-if="row.conversationId" link type="primary" @click="router.push({ path: `/executions/${row.id}`, query: { view: 'conversation' } })">会话对话</ElButton>
+              <span v-else class="text-xs text-muted-foreground">独立执行</span>
+            </template>
+          </ElTableColumn>
         </ElTable>
         <div class="mt-4 flex justify-end">
           <ElPagination
