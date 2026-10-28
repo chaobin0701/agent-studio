@@ -138,7 +138,7 @@ export interface ExecutionView {
     artifacts: { id?: string; kind?: string }[];
     references: { id?: string; kind?: string; title?: string }[];
   };
-  externalTrace: { sampled: boolean };
+  externalTrace: { sampled: boolean; provider: "langsmith" | "phoenix" | null };
 }
 export interface ExecutionRecord {
   id: string;
@@ -195,5 +195,5 @@ export const executionsApi = {
       available: boolean;
       reason: string | null;
       url: string | null;
-    }>(`/executions/${encodeURIComponent(id)}/phoenix`),
+    }>(`/executions/${encodeURIComponent(id)}/external-trace`),
 };

@@ -1,5 +1,7 @@
 # 模型 SDK 接入与治理边界
 
+> 2026-10-28：当前追踪出口已迁移到 LangSmith，配置与验收入口见 [LangSmith 追踪](langsmith-tracing.md)。本文中的 Phoenix 入库数量和命令属于历史验收记录，不代表当前配置。
+
 ## 当前实现
 
 LLM 运行时使用固定版本 `@langchain/openai@1.6.2` 的 `ChatOpenAI`，底层官方 OpenAI SDK 在 lockfile 中固定为 `7.32.0`，共享 `@langchain/core@1.2.17`。不是在旧 HTTP 适配器外面再包一层 SDK：旧手写 HTTP 请求、SSE 帧解析和流式用量参数自动协商已删除，原导入路径仅重导出同一个实现。

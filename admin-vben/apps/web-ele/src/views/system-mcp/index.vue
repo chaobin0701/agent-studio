@@ -168,7 +168,7 @@ onMounted(async () => { await workspace.initialize(); await load(); });
           <div class="policy-row"><div><strong>Trace 正文</strong><p>在执行轨迹中保留提问、模型输出和最终回答。</p></div><ElSwitch v-model="policy.conversationContentEnabled" :disabled="!canManage || !policy.traceEnabled" aria-label="Trace 正文" /></div>
           <div class="policy-row"><div><strong>Trace Token 用量</strong><p>在执行轨迹中记录输入、输出及总 Token 数。</p></div><ElSwitch v-model="policy.usageEnabled" :disabled="!canManage || !policy.traceEnabled" aria-label="Trace Token 用量" /></div>
         </div>
-        <p class="policy-note">独立 Phoenix 收集器由服务端观测配置管理。</p>
+        <p class="policy-note">LangSmith 追踪由服务端观测配置管理。</p>
         <ElButton v-if="canManage" type="primary" :loading="savingPolicy" @click="savePolicy">保存策略</ElButton>
       </PagePanel>
     </div>

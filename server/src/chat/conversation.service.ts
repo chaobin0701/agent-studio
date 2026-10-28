@@ -3,7 +3,9 @@ import { currentWorkspaceId } from "../workspaces/workspace-context";
 import { ExecutionTracingService } from "../observability/tracing.module";
 import {
   annotateExecution,
+  annotateTraceContent,
   safeTraceMetadata,
+  safeTraceSnapshot,
 } from "../observability/execution-tracer";
 import { agentMemoryScope } from "../agent-management/runtime-scope";
 import { AgentManagementService } from "../agent-management/agent-management.service";
@@ -407,7 +409,12 @@ export class ConversationService {
           "agent_request",
           "chain",
           { conversationId: id, workspaceId: currentWorkspaceId() },
-          async () => execute(),
+          async () => {
+            annotateTraceContent({ input: { question } });
+            const answer = await execute();
+            annotateTraceContent({ output: { answer: answer.answer } });
+            return answer;
+          },
         )
       : execute();
   }
@@ -874,7 +881,7 @@ export class ConversationService {
           conversationId,
           user.rows[0].id,
           policy.conversationContentEnabled ? question : "",
-          JSON.stringify(policy.conversationContentEnabled ? run.contextSnapshot : safeTraceMetadata(run.contextSnapshot as any)),
+          JSON.stringify(policy.conversationContentEnabled ? run.contextSnapshot : safeTraceSnapshot(run.contextSnapshot as any)),
           run.rawModelOutput ? this.llm.model : null,
           policy.conversationContentEnabled ? run.rawModelOutput : null,
           policy.conversationContentEnabled ? run.result.answer : null,
@@ -1029,7 +1036,7 @@ export class ConversationService {
         trace.conversationId,
         trace.userMessageId,
         policy.conversationContentEnabled ? trace.question : "",
-        JSON.stringify(policy.conversationContentEnabled ? trace.contextSnapshot : safeTraceMetadata(trace.contextSnapshot as any)),
+        JSON.stringify(policy.conversationContentEnabled ? trace.contextSnapshot : safeTraceSnapshot(trace.contextSnapshot as any)),
         trace.model,
         policy.conversationContentEnabled ? trace.rawModelOutput : null,
         policy.conversationContentEnabled ? trace.finalAnswer : null,
@@ -1096,7 +1103,7 @@ export class ConversationService {
     });
     const started = Date.now();
     const summaryTraceId = randomUUID();
-    let phoenix: ReturnType<ExecutionTracingService["link"]> | undefined;
+    let externalTrace: ReturnType<ExecutionTracingService["link"]> | undefined;
     const operation = async () => {
       try {
         const result = await this.llm.completeDetailed(
@@ -1107,7 +1114,7 @@ export class ConversationService {
         );
         const traceContext = {
           ...contextSnapshot,
-          ...(phoenix ? { phoenix } : {}),
+          ...(externalTrace ? { externalTrace } : {}),
           ...(contextBudget ? { contextBudget } : {}),
           ...(promptSnapshot && this.promptRuntime
             ? { promptVersions: this.promptRuntime.metadata(promptSnapshot) }
@@ -1159,7 +1166,7 @@ export class ConversationService {
             [
               summaryTraceId,
               conversationId,
-              JSON.stringify(recordPolicy.conversationContentEnabled ? traceContext : safeTraceMetadata(traceContext as any)),
+              JSON.stringify(recordPolicy.conversationContentEnabled ? traceContext : safeTraceSnapshot(traceContext as any)),
               result.model,
               recordPolicy.conversationContentEnabled ? result.content : null,
               recordPolicy.conversationContentEnabled ? result.content.slice(0, limits.summaryMaxChars) : null,
@@ -1183,14 +1190,14 @@ export class ConversationService {
               conversationId,
               JSON.stringify(recordPolicy.conversationContentEnabled ? {
                 ...contextSnapshot,
-                ...(phoenix ? { phoenix } : {}),
+                ...(externalTrace ? { externalTrace } : {}),
                 ...(promptSnapshot && this.promptRuntime
                   ? {
                       promptVersions:
                         this.promptRuntime.metadata(promptSnapshot),
                     }
                   : {}),
-              } : safeTraceMetadata(contextSnapshot as any)),
+              } : safeTraceSnapshot({ ...contextSnapshot, ...(externalTrace ? { externalTrace } : {}) } as any)),
               this.llm.model,
               recordPolicy.usageEnabled && error instanceof ModelFailure ? error.usage.inputTokens : null,
               recordPolicy.usageEnabled && error instanceof ModelFailure ? error.usage.outputTokens : null,
@@ -1216,7 +1223,7 @@ export class ConversationService {
             .digest("hex"),
         },
         async (span) => {
-          phoenix = this.tracing!.link(span);
+          externalTrace = this.tracing!.link(span);
           await operation();
         },
       );

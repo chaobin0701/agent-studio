@@ -2,7 +2,7 @@ import { BaseCallbackHandler } from "@langchain/core/callbacks/base";
 import { ConsoleCallbackHandler } from "@langchain/core/tracers/console";
 
 /** Suppress ambient LangSmith tracing without mutating process-wide settings.
- * The metadata-only platform Phoenix provider is the only authorized exporter. */
+ * The metadata-only platform OpenTelemetry provider is the only authorized exporter. */
 class PrivateFrameworkCallbacks extends BaseCallbackHandler {
   name = "langchain_tracer";
   updateFromRunTree(): void {}

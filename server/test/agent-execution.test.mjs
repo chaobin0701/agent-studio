@@ -1,4 +1,5 @@
-import { collectPhoenixSpans } from "./helpers/phoenix-collector.mjs";
+import { TestExecutionTracer } from "./helpers/trace-collector.mjs";
+import { collectOtlpSpans } from "./helpers/trace-collector.mjs";
 import "reflect-metadata";
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -20,7 +21,6 @@ import {
   runtimeScope,
   freeze,
 } from "../dist/agent-management/runtime-scope.js";
-import { PhoenixExecutionTracer } from "../dist/observability/execution-tracer.js";
 import {
   SharedExecutionBudget,
   SharedExecutionBudgetError,
@@ -154,9 +154,9 @@ function fixture(limits = {}, handler) {
   const llm = new LlmService(provider),
     registry = new ToolRegistry(),
     toolRuntime = new ToolExecutionService(registry, new ToolPolicy());
-  const tracer = new PhoenixExecutionTracer(
+  const tracer = new TestExecutionTracer(
     { enabled: true, project: "fixture" },
-    collectPhoenixSpans(exported),
+    collectOtlpSpans(exported),
   );
   const resolve = (id, key) => {
     const tools = new Map();
@@ -688,7 +688,7 @@ test("formal Chat uses native Deep Agents with two authorized members and lazy m
   );
 });
 
-test("formal member Skill auxiliary reads are isolated, lazy, budgeted and metadata-only in Phoenix", async () => {
+test("formal member Skill auxiliary reads are isolated, lazy, budgeted and metadata-only in LangSmith", async () => {
   let rootRounds = 0;
   const f = fixture({}, async (request) => {
     const id = runtimeScope.getStore().version.id;

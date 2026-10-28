@@ -23,6 +23,7 @@ import {
 import {
   executionSpan,
   annotateExecution,
+  annotateTraceContent,
 } from "../../observability/execution-tracer";
 import { currentExecutionBudget } from "../agent/execution-budget";
 import type {
@@ -332,6 +333,7 @@ export class ToolExecutionService {
     options?: ToolExecutionOptions,
   ): Promise<ToolExecutionOutcome> {
     return executionSpan(`tool_${name}`, "tool", {}, async () => {
+      annotateTraceContent({ input: args });
       const outcome = await this.executeWithTool(
         name,
         args,
@@ -346,6 +348,7 @@ export class ToolExecutionService {
         deferred: outcome.trace.deferred,
         reused: outcome.trace.reused,
       });
+      annotateTraceContent({ output: outcome.result });
       return outcome;
     });
   }

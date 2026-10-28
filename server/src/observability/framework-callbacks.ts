@@ -112,8 +112,12 @@ class MetadataFrameworkCallbacks extends BaseCallbackHandler {
           [SemanticConventions.OPENINFERENCE_SPAN_KIND]:
             OpenInferenceSpanKind.CHAIN,
           "app.layer": "framework",
+          "langsmith.span.kind": "chain",
           metadata: JSON.stringify({
             ...metadata,
+            ...(metadata.conversationId
+              ? { thread_id: metadata.conversationId }
+              : {}),
             framework: "openinference-langchain-4.1.4",
           }),
         };
@@ -133,6 +137,10 @@ class MetadataFrameworkCallbacks extends BaseCallbackHandler {
           updateName: () => facade,
           recordException: () => {},
           setStatus: (status) => {
+            if (status.code === SpanStatusCode.ERROR)
+              raw.addEvent("exception", {
+                "exception.message": "framework_failed",
+              });
             raw.setStatus({
               code: status.code,
               ...(status.code === SpanStatusCode.ERROR
@@ -253,9 +261,17 @@ class MetadataFrameworkCallbacks extends BaseCallbackHandler {
       const id = safeId(a[1]);
       const context = id ? this.parent(id) : undefined;
       const span = context ? this.spans.get(context.spanId) : undefined;
-      span?.setAttributes({ "app.status": "waiting", metadata: JSON.stringify({
-        ...this.metadata, framework: "openinference-langchain-4.1.4", status: "waiting",
-      }) });
+      span?.setAttributes({
+        "app.status": "waiting",
+        metadata: JSON.stringify({
+          ...this.metadata,
+          ...(this.metadata.conversationId
+            ? { thread_id: this.metadata.conversationId }
+            : {}),
+          framework: "openinference-langchain-4.1.4",
+          status: "waiting",
+        }),
+      });
       // Native interrupt payloads never enter SDK error formatting or storage.
       return this.end("handleChainEnd", [{}, id], a[1]);
     }
@@ -291,6 +307,9 @@ class MetadataFrameworkCallbacks extends BaseCallbackHandler {
     if (this.closed) return;
     this.closed = true;
     for (const span of this.spans.values()) {
+      span.addEvent("exception", {
+        "exception.message": "framework_incomplete",
+      });
       span.setStatus({
         code: SpanStatusCode.ERROR,
         message: "framework_incomplete",

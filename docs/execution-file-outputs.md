@@ -1,5 +1,7 @@
 # 执行文件产物：授权、保存、下载与清理
 
+> 2026-10-28：当前追踪出口已迁移到 LangSmith，配置与验收入口见 [LangSmith 追踪](langsmith-tracing.md)。本文中的 Phoenix 入库数量和命令属于历史验收记录，不代表当前配置。
+
 ## 当前实现
 
 独立重构 worktree 已在正式 Run 和已发布 Agent Chat 的共用 Deep Agents 执行服务接入文件产物。继续使用限量 `StateBackend`，不开放宿主机目录、Shell、执行器或默认长期记忆。虚拟工作区的使用边界参考 [Deep Agents Backends](https://docs.langchain.com/oss/javascript/deepagents/backends) 与 [权限](https://docs.langchain.com/oss/javascript/deepagents/permissions)。

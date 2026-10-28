@@ -1,6 +1,10 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { randomBytes } from "node:crypto";
-import { register } from "@arizeai/phoenix-otel";
+import { resourceFromAttributes } from "@opentelemetry/resources";
+import {
+  BasicTracerProvider,
+  AlwaysOnSampler,
+} from "@opentelemetry/sdk-trace-base";
 import {
   ROOT_CONTEXT,
   trace,
@@ -12,15 +16,28 @@ import {
   SemanticConventions,
   OpenInferenceSpanKind,
 } from "@arizeai/openinference-semantic-conventions";
-import { PhoenixSpanProcessor } from "./phoenix-exporter";
-import { localPhoenixUrl } from "../config/tracing-config";
-import { phoenixTraceUrl } from "./phoenix-link";
+import { LangSmithSpanProcessor } from "./langsmith-exporter";
+import {
+  normalizeTracingOptions,
+  type TracingOptions,
+  type ResolvedTracingOptions,
+} from "../config/tracing-config";
+import {
+  destinationId,
+  langSmithRunId,
+  safeExternalTrace,
+  type ExternalTraceMapping,
+} from "./trace-mapping";
 import {
   createFrameworkCapture,
   frameworkParent,
   type FrameworkCapture,
 } from "./framework-callbacks";
-import { InteractionSuspension, InteractionWaiting } from "../interactions/contracts";
+import {
+  InteractionSuspension,
+  InteractionWaiting,
+} from "../interactions/contracts";
+import { traceContentValue } from "./trace-content";
 
 export type TraceMetadata = Record<string, unknown>;
 export type TraceKind = "chain" | "llm" | "tool" | "retriever" | "embedding";
@@ -43,13 +60,8 @@ export interface ExecutionTracer {
     operation: (span: ExecutionSpan) => Promise<T>,
   ): Promise<T>;
   annotate(metadata: TraceMetadata): void;
-  link(span: ExecutionSpan): {
-    runId: string;
-    traceId: string;
-    url: string | null;
-    project: string;
-    enabled: boolean;
-  };
+  annotateContent?(content: { input?: unknown; output?: unknown }): void;
+  link(span: ExecutionSpan): ExternalTraceMapping;
 }
 const activeTracer = new AsyncLocalStorage<ExecutionTracer>();
 export function executionSpan<T>(
@@ -65,6 +77,12 @@ export function executionSpan<T>(
 }
 export function annotateExecution(metadata: TraceMetadata): void {
   activeTracer.getStore()?.annotate(metadata);
+}
+export function annotateTraceContent(content: {
+  input?: unknown;
+  output?: unknown;
+}): void {
+  activeTracer.getStore()?.annotateContent?.(content);
 }
 export function frameworkTracing(
   allowedNames: readonly string[] = [],
@@ -237,52 +255,57 @@ export function safeTraceMetadata(
   return safe;
 }
 
-export type PhoenixTracingOptions = {
-  enabled: boolean;
-  endpoint?: string;
-  webUrl?: string;
-  apiKey?: string;
-  project?: string;
-  sampleRate?: number;
-  timeoutMs?: number;
-  queueLimit?: number;
-};
+/** Keep a safe external mapping when local conversation bodies are disabled. */
+export function safeTraceSnapshot(value: TraceMetadata): TraceMetadata {
+  const mapping = safeExternalTrace(value.externalTrace);
+  return {
+    ...safeTraceMetadata(value),
+    ...(mapping ? { externalTrace: mapping } : {}),
+  };
+}
+
 type LiveSpan = { span: ExecutionSpan; otel?: Span };
 
-/** Private Phoenix SDK provider with governance spans and request-local,
+/** Private OpenTelemetry provider with governance spans and request-local,
  * metadata-only official framework callbacks. No global instrumentation;
  * only actual model attempts carry LLM kind and usage counters. */
-export class PhoenixExecutionTracer implements ExecutionTracer {
+export class LangSmithExecutionTracer implements ExecutionTracer {
   private readonly scope = new AsyncLocalStorage<LiveSpan>();
-  private readonly processor?: PhoenixSpanProcessor;
-  private readonly provider?: ReturnType<typeof register>;
+  private readonly processor?: LangSmithSpanProcessor;
+  private readonly provider?: BasicTracerProvider;
   private readonly tracer?: Tracer;
-  readonly metrics: PhoenixSpanProcessor["metrics"];
-  constructor(
-    private readonly options: PhoenixTracingOptions,
-    fetcher?: typeof fetch,
-  ) {
-    const endpoint = options.endpoint ?? "http://127.0.0.1:6006/v1/traces";
-    if (!localPhoenixUrl(endpoint))
-      throw new Error("Phoenix must be a local/private endpoint");
-    if (options.enabled) {
-      this.processor = new PhoenixSpanProcessor(
-        {
-          endpoint: endpoint.replace(/\/$/u, "").endsWith("/v1/traces")
-            ? endpoint
-            : `${endpoint.replace(/\/$/u, "")}/v1/traces`,
-          apiKey: options.apiKey,
-          timeoutMs: options.timeoutMs ?? 2000,
-          queueLimit: options.queueLimit ?? 1000,
+  readonly metrics: LangSmithSpanProcessor["metrics"];
+  private readonly options: ResolvedTracingOptions;
+  constructor(options: TracingOptions, fetcher?: typeof fetch) {
+    this.options = normalizeTracingOptions(options);
+    if (this.options.enabled) {
+      this.processor = new LangSmithSpanProcessor(this.options, fetcher);
+      this.provider = new BasicTracerProvider({
+        // Sampling is governed above, never by ambient OTEL configuration.
+        sampler: new AlwaysOnSampler(),
+        generalLimits: {
+          attributeCountLimit: 128,
+          attributeValueLengthLimit: 4_000_000,
         },
-        fetcher,
-      );
-      this.provider = register({
-        projectName: options.project ?? "generic-agents",
-        global: false,
+        spanLimits: {
+          attributeCountLimit: 128,
+          attributeValueLengthLimit: 4_000_000,
+          // Only our safe exception classification event is emitted. The SDK
+          // facade discards arbitrary events and original exceptions.
+          eventCountLimit: 1,
+          linkCountLimit: 0,
+          attributePerEventCountLimit: 1,
+          attributePerLinkCountLimit: 0,
+        },
+        resource: resourceFromAttributes({
+          "service.name": "agent-studio",
+          ...(this.options.project
+            ? { "openinference.project.name": this.options.project }
+            : {}),
+        }),
         spanProcessors: [this.processor],
       });
-      this.tracer = this.provider.getTracer("agent-studio.agent", "1.0.0");
+      this.tracer = this.provider.getTracer("agent-studio.agent", "2.0.0");
     }
     this.metrics = this.processor?.metrics ?? {
       exported: 0,
@@ -338,7 +361,10 @@ export class PhoenixExecutionTracer implements ExecutionTracer {
       // Human interaction is a successful control-flow boundary. Only trusted
       // platform classes qualify; an external tool's matching code is no grant.
       // Never inspect/export the request, checkpoint or private continuation.
-      if (error instanceof InteractionSuspension || error instanceof InteractionWaiting) {
+      if (
+        error instanceof InteractionSuspension ||
+        error instanceof InteractionWaiting
+      ) {
         this.finish(live, "waiting");
         throw error;
       }
@@ -378,13 +404,26 @@ export class PhoenixExecutionTracer implements ExecutionTracer {
     if (current)
       Object.assign(current.span.metadata, safeTraceMetadata(metadata));
   }
-  link(span: ExecutionSpan) {
+  annotateContent(content: { input?: unknown; output?: unknown }): void {
+    if (!this.options.contentEnabled) return;
+    const current = this.scope.getStore();
+    if (!current?.otel) return;
+    if (content.input !== undefined)
+      current.otel.setAttribute("input.value", traceContentValue(content.input));
+    if (content.output !== undefined)
+      current.otel.setAttribute("output.value", traceContentValue(content.output));
+  }
+  link(span: ExecutionSpan): ExternalTraceMapping {
     return {
-      runId: span.id,
-      traceId: span.traceId,
-      project: this.options.project ?? "generic-agents",
+      schemaVersion: 1,
+      provider: "langsmith",
       enabled: span.sampled,
-      url: span.sampled ? phoenixTraceUrl(this.options, span.traceId) : null,
+      traceId: span.traceId,
+      runId: langSmithRunId(span.traceId, span.id),
+      rootRunId:
+        this.processor?.rootRunId(span.id) ??
+        langSmithRunId(span.traceId, span.id),
+      destination: destinationId(this.options),
     };
   }
   private finish(
@@ -415,7 +454,16 @@ export class PhoenixExecutionTracer implements ExecutionTracer {
         ? OpenInferenceSpanKind.AGENT
         : kinds[span.kind],
     );
-    otel.setAttribute(SemanticConventions.METADATA, JSON.stringify(metadata));
+    otel.setAttribute("langsmith.span.kind", span.kind);
+    otel.setAttribute(
+      SemanticConventions.METADATA,
+      JSON.stringify({
+        ...metadata,
+        ...(metadata.conversationId
+          ? { thread_id: metadata.conversationId }
+          : {}),
+      }),
+    );
     for (const [key, value] of Object.entries(metadata))
       if (value !== null) otel.setAttribute(`app.${key}`, value);
     for (const [key, attribute] of Object.entries(
@@ -435,12 +483,17 @@ export class PhoenixExecutionTracer implements ExecutionTracer {
       if (typeof value === "string" || typeof value === "number")
         otel.setAttribute(attribute, value);
     }
+    const failureCode =
+      errorCode ?? String(metadata.errorCode ?? "execution_failed");
+    // LangSmith derives run.error from exception events. Export only the
+    // allowlisted classification, never the original Error or its stack.
+    if (failed)
+      otel.addEvent("exception", { "exception.message": failureCode });
     otel.setStatus({
       code: failed ? SpanStatusCode.ERROR : SpanStatusCode.OK,
       ...(failed
         ? {
-            message:
-              errorCode ?? String(metadata.errorCode ?? "execution_failed"),
+            message: failureCode,
           }
         : {}),
     });

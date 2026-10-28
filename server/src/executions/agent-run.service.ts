@@ -34,7 +34,10 @@ import { currentWorkspaceId } from "../workspaces/workspace-context";
 import { publicIntegrationError } from "../integrations/quota-error";
 import { withModelCallAccounting } from "../chat/model-call-accounting";
 import { ExecutionTracingService } from "../observability/tracing.module";
-import { annotateExecution } from "../observability/execution-tracer";
+import {
+  annotateExecution,
+  annotateTraceContent,
+} from "../observability/execution-tracer";
 import { ExecutionArtifactService } from "../artifacts/execution-artifact.service";
 import type { PendingFileOutput } from "../artifacts/file-output";
 import {
@@ -260,8 +263,11 @@ export class AgentRunService {
         "chain",
         task.versions,
         async (span) => {
+          annotateTraceContent({
+            input: { task: input.task, messages: input.messages },
+          });
           const parentLink = this.tracing.link(span);
-          snapshot.phoenix = parentLink;
+          snapshot.externalTrace = parentLink;
           try {
             signal?.throwIfAborted();
             const evidence = await this.attachments(input, composition);
@@ -297,7 +303,7 @@ export class AgentRunService {
                     ...callbacks,
                     onContext: (value) => {
                       snapshot = value;
-                      value.phoenix ??= parentLink;
+                      value.externalTrace ??= parentLink;
                       value.entryPoint = prepared.entryPoint ?? "generic_run";
                       value.executionInput = task;
                       callbacks.onContext?.(value);
@@ -319,6 +325,7 @@ export class AgentRunService {
               agentId: composition.agentId,
               agentVersionId: composition.entryVersionId,
             };
+            annotateTraceContent({ output: { answer: response.answer } });
             phase = "persistence";
             await this.persist(
               identity,

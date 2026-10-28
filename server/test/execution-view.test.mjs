@@ -2,28 +2,26 @@ import "reflect-metadata";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { executionContextView } from "../dist/observability/execution-view.js";
-import {
-  phoenixTraceUrl,
-  recordedPhoenixLink,
-} from "../dist/observability/phoenix-link.js";
+import { recordedLangSmithLink } from "../dist/observability/langsmith-link.js";
+import { normalizeTracingOptions } from "../dist/config/tracing-config.js";
+import { configuredTraceUrl, destinationId, safeLangSmithAppPath } from "../dist/observability/trace-mapping.js";
 import { AdminExecutionController } from "../dist/observability/admin-execution.controller.js";
 import { AdminChatTraceController } from "../dist/chat/admin-chat-trace.controller.js";
 import { platformPermission } from "../dist/workspaces/workspace-access.js";
 import { PERMISSION_KEY } from "../dist/admin/permission.decorator.js";
 
 const uuid = "11111111-1111-4111-8111-111111111111";
-const options = {
-  enabled: true,
-  webUrl: "http://127.0.0.1:6006",
-  project: "acceptance",
-};
+const options = normalizeTracingOptions({
+  enabled: true, apiKey: "fixture-key", project: "acceptance",
+  workspaceId: uuid, projectId: "22222222-2222-4222-8222-222222222222",
+});
 const link = {
-  enabled: true,
+  schemaVersion: 1, provider: "langsmith", enabled: true,
   traceId: "33333333333343338333333333333333",
-  project: "acceptance",
-  runId: "1212121212121212",
-  url: phoenixTraceUrl(options, "33333333333343338333333333333333"),
+  runId: "33333333-3333-4333-8333-333333333333",
+  destination: destinationId(options),
 };
+const cloudUrl = configuredTraceUrl(options, link.runId);
 
 test("ordinary execution projection retains nested attempts/retrieval/version IDs, never full state or collector links", () => {
   const privateData = {
@@ -99,7 +97,7 @@ test("ordinary execution projection retains nested attempts/retrieval/version ID
       {
         key: "member",
         task: "PRIVATE_TASK",
-        context: { ...privateData, executionSteps: [step], phoenix: link },
+        context: { ...privateData, executionSteps: [step], externalTrace: link },
       },
     ],
     executionBudget: {
@@ -115,7 +113,7 @@ test("ordinary execution projection retains nested attempts/retrieval/version ID
       artifacts: [{ id: "report-1", kind: "report", data: privateData }],
       structured: privateData,
     },
-    phoenix: link,
+    externalTrace: link,
   };
   const result = executionContextView(snapshot);
   assert.equal(result.runId, uuid);
@@ -146,29 +144,14 @@ test("ordinary execution projection retains nested attempts/retrieval/version ID
   );
 });
 
-test("private Phoenix links reject invalid trace IDs, credentials, redirects and changed project mappings", () => {
-  assert.equal(recordedPhoenixLink(link, options).available, true);
-  assert.equal(
-    recordedPhoenixLink(link, { ...options, project: "changed" }).available,
-    false,
-  );
-  for (const url of [
-    "https://app.phoenix.arize.com",
-    "http://user:secret@localhost:6006",
-    "http://localhost:6006?redirect=evil",
-    "javascript:alert(1)",
-  ])
-    assert.equal(phoenixTraceUrl({ ...options, webUrl: url }, uuid), null);
-  assert.equal(phoenixTraceUrl(options, "../other-project"), null);
-  assert.equal(
-    recordedPhoenixLink({ ...link, url: "https://evil.invalid/" }, options)
-      .available,
-    false,
-  );
-  assert.equal(
-    recordedPhoenixLink({ ...link, enabled: false }, options).available,
-    false,
-  );
+test("private LangSmith links reject invalid IDs, untrusted paths and changed destination mappings", async () => {
+  assert.equal((await recordedLangSmithLink(link, options)).url, cloudUrl);
+  assert.equal((await recordedLangSmithLink(link, { ...options, project: "changed" })).available, false);
+  assert.equal(safeLangSmithAppPath(options.webUrl,"//evil.invalid/",link.runId),null);
+  assert.equal(safeLangSmithAppPath(options.webUrl,"/o/../other",link.runId),null);
+  assert.equal((await recordedLangSmithLink({...link,runId:"../other"},options)).available,false);
+  assert.equal((await recordedLangSmithLink({...link,enabled:false},options)).available,false);
+  assert.equal((await recordedLangSmithLink({traceId:link.traceId,project:"old",url:cloudUrl},options)).reason,"historical_or_missing");
   assert.equal(platformPermission("observability.external.read"), true);
   assert.equal(platformPermission("conversations.read"), false);
   assert.deepEqual(
@@ -192,7 +175,7 @@ test("execution endpoints use scoped queries, bound filters, independent collect
                 {
                   id: uuid,
                   contextSnapshot: {
-                    phoenix: link,
+                    externalTrace: link,
                     systemPrompt: "PRIVATE_PROMPT",
                   },
                 },
@@ -227,7 +210,7 @@ test("execution endpoints use scoped queries, bound filters, independent collect
         workspacePermissionCodes: ["conversations.read"],
       })
     ).url,
-    link.url,
+    cloudUrl,
   );
   assert.doesNotMatch(
     JSON.stringify(await new AdminChatTraceController(db).detail(uuid)),

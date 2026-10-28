@@ -2,8 +2,8 @@
 // configuration; creates no resources, conversations or business transactions.
 if (process.env.AGENT_ACCEPTANCE_ENV_FILE)
   process.loadEnvFile(process.env.AGENT_ACCEPTANCE_ENV_FILE);
-process.env.PHOENIX_TRACING =
-  process.env.AGENT_ACCEPTANCE_PHOENIX === "true" ? "true" : "false";
+process.env.AGENT_STUDIO_LANGSMITH_ENABLED =
+  process.env.AGENT_ACCEPTANCE_LANGSMITH === "true" ? "true" : "false";
 require("reflect-metadata");
 const assert = require("node:assert/strict");
 const { randomUUID } = require("node:crypto");
@@ -32,7 +32,7 @@ let stage = "read_configuration";
   const config = new AppConfigService(),
     db = new DatabaseService(config);
   const tracing =
-    process.env.AGENT_ACCEPTANCE_PHOENIX === "true"
+    process.env.AGENT_ACCEPTANCE_LANGSMITH === "true"
       ? new ExecutionTracingService(config)
       : undefined;
   const originalFetch = globalThis.fetch;
@@ -194,33 +194,18 @@ let stage = "read_configuration";
         stage = "cancel_trace_readback";
         assert.equal(await tracing.flush(), true);
         assert.equal(tracing.metrics.failed, 0);
-        const base = config.tracing.endpoint.replace(/\/v1\/traces\/?$/, "");
-        let spans = [];
-        for (let i = 0; i < 20; i++) {
-          const response = await fetch(
-            `${base}/v1/projects/${encodeURIComponent(config.tracing.project)}/spans?limit=1000&trace_id=${link.traceId}`,
-            {
-              signal: AbortSignal.timeout(3000),
-              headers: config.tracing.apiKey
-                ? { Authorization: `Bearer ${config.tracing.apiKey}` }
-                : {},
-            },
-          );
-          if (response.ok) spans = (await response.json()).data;
-          if (spans.some((span) => span.name === "model_attempt")) break;
-          await new Promise((resolve) => setTimeout(resolve, 500));
-        }
+        const rows = await require("./langsmith-readback.cjs").readStoredTrace(config.tracing, link, ["model_attempt"]);
         assert.ok(
-          spans.some(
+          rows.some(
             (span) =>
               span.name === "model_attempt" && span.status_code === "ERROR",
           ),
         );
         assert.doesNotMatch(
-          JSON.stringify(spans),
+          JSON.stringify(rows),
           /PRIVATE_|input\.value|output\.value|authorization|apiKey/,
         );
-        persistedSpans = spans.length;
+        persistedSpans = rows.length;
       }
       console.log(
         JSON.stringify({
@@ -231,7 +216,7 @@ let stage = "read_configuration";
           reservations,
           settlements,
           usage: "unknown/conservative budget",
-          ...(persistedSpans ? { phoenixPersistedSpans: persistedSpans } : {}),
+          ...(persistedSpans ? { langsmithPersistedSpans: persistedSpans } : {}),
         }),
       );
     });

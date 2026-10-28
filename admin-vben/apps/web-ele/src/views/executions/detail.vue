@@ -22,7 +22,7 @@ import ManagementHeader from "#/components/ManagementHeader.vue";
 import PagePanel from "#/components/PagePanel.vue";
 import HelpTip from "#/components/HelpTip.vue";
 import { executionsApi, type ExecutionDetail } from "#/api/executions";
-import { safePhoenixLink } from "#/api/phoenix-link";
+import { safeLangSmithLink } from "#/api/langsmith-link";
 import { useWorkspaceStore } from "#/store/workspace";
 import ExecutionTree from "./ExecutionTree.vue";
 import FileArtifacts from "./FileArtifacts.vue";
@@ -63,22 +63,37 @@ async function load() {
     detail.value = result;
     if (!result.execution.externalTrace.sampled)
       externalMessage.value =
-        "此执行未启用或未采样Phoenix 追踪，本地记录仍可查看。";
+        result.execution.externalTrace.provider === "phoenix"
+          ? "此记录来自历史 Phoenix 追踪，本地详情仍可查看。"
+          : "此执行未启用或未采样 LangSmith 追踪，本地记录仍可查看。";
     else if (!collectorPermission.value)
-      externalMessage.value = "查看 Phoenix 需要独立的平台追踪访问权限。";
+      externalMessage.value = "查看 LangSmith 需要独立的平台追踪访问权限。";
     else {
       try {
         const link = await executionsApi.external(id);
         if (request !== generation) return;
-        const url = safePhoenixLink(link.url);
+        const url = safeLangSmithLink(link.url);
         if (link.available && url) externalUrl.value = url;
-        else
-          externalMessage.value =
-            "此执行没有可用的本地 Phoenix 链接；请检查该次执行的 Phoenix 配置。";
+        else {
+          const reasons: Record<string, string> = {
+            invalid_credentials: "LangSmith 凭证无效或已过期，请检查服务端追踪配置。",
+            rate_limited: "LangSmith 查询触发限流，请稍后刷新；不代表追踪丢失。",
+            lookup_timeout: "连接 LangSmith 超时，请稍后刷新；本地记录仍可查看。",
+            lookup_failed: "暂时无法连接 LangSmith 或读取追踪，请稍后刷新。",
+            link_unavailable: "已读取 LangSmith 追踪，但无法解析详情链接，请检查目标配置。",
+            not_sampled: "此执行未采样 LangSmith 追踪，本地记录仍可查看。",
+            read_permission_required: "追踪 Key 仅允许写入。请配置目标工作区与项目 ID 以生成入口，或使用有读取权限的凭证解析入口。",
+            not_ingested: "LangSmith 暂未读到此执行，可能仍在入库；可稍后刷新。",
+            destination_changed: "此执行所属追踪目标与当前部署配置不同。",
+            disabled: "LangSmith 追踪当前已关闭。",
+            historical_or_missing: "此历史记录没有 LangSmith 追踪映射，本地详情仍可查看。",
+          };
+          externalMessage.value = reasons[link.reason || ""] || "LangSmith 入口暂时不可用，本地记录仍可查看。";
+        }
       } catch {
         if (request === generation)
           externalMessage.value =
-            "Phoenix 链接加载失败；不影响查看本地执行记录。";
+            "LangSmith 链接加载失败；不影响查看本地执行记录。";
       }
     }
   } catch {
@@ -122,6 +137,19 @@ const activeView = computed({
 <template>
   <Page>
     <ManagementHeader title="运行详情">
+      <div v-if="externalUrl && collectorPermission" class="flex items-center gap-2">
+        <ElLink
+          :href="externalUrl"
+          target="_blank"
+          rel="noopener noreferrer"
+          type="primary"
+          >在 LangSmith 查看执行树</ElLink
+        >
+        <HelpTip
+          long
+          text="LangSmith 接收显式配置的脱敏执行元数据，包括版本、耗时、用量、重试及错误分类；不上传对话正文、完整提示词、工具参数或文档。外部入口不代表已经确认入库，本地 Trace 和审计仍是业务依据。"
+        />
+      </div>
       <ElButton @click="router.push('/executions')">返回列表</ElButton
       ><ElButton :loading="loading" @click="load">刷新</ElButton>
     </ManagementHeader>
@@ -204,20 +232,6 @@ const activeView = computed({
                 <ElCollapse>
                   <ElCollapseItem name="metadata" title="版本与技术信息">
                     <div class="space-y-4 pt-2">
-                      <div class="flex flex-wrap items-center gap-2">
-                        <ElLink
-                          v-if="externalUrl && collectorPermission"
-                          :href="externalUrl"
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          type="primary"
-                          >在 Phoenix 查看执行树</ElLink
-                        >
-                        <HelpTip
-                          long
-                          text="Phoenix 是本地部署的追踪服务，不向云端上传数据。仅记录版本、耗时、用量、重试及错误分类，不记录完整提示词、工具参数或文档正文。本地 Trace 和审计仍是业务依据。"
-                        />
-                      </div>
                       <ElAlert
                         v-if="externalMessage"
                         :title="externalMessage"

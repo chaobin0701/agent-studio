@@ -8,7 +8,7 @@ root.loadSync("opentelemetry/proto/collector/trace/v1/trace_service.proto");
 const request = root.lookupType(
   "opentelemetry.proto.collector.trace.v1.ExportTraceServiceRequest",
 );
-export function decodePhoenixRequest(bytes) {
+export function decodeOtlpRequest(bytes) {
   const body = request.toObject(request.decode(Buffer.from(bytes)), {
     longs: String,
     bytes: Buffer,

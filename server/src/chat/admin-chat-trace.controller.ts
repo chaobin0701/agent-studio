@@ -38,7 +38,8 @@ export class AdminChatTraceController {
     const context = contextSnapshot && typeof contextSnapshot === 'object' && !Array.isArray(contextSnapshot)
       ? { ...(contextSnapshot as Record<string, unknown>) }
       : {};
-    delete context.phoenix; // The local collector spans workspaces; links need a separate platform grant.
+    delete context.externalTrace;
+    delete context.phoenix; // Historical links also need a separate platform grant.
     delete context.langSmith; // Do not expose legacy stored external links.
     delete context.systemPrompt;
     delete context.modelCalls;

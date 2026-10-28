@@ -3,8 +3,8 @@
 const root = require("node:path").resolve(__dirname, "../..");
 if (process.env.AGENT_ACCEPTANCE_ENV_FILE)
   process.loadEnvFile(process.env.AGENT_ACCEPTANCE_ENV_FILE);
-process.env.PHOENIX_TRACING =
-  process.env.AGENT_ACCEPTANCE_PHOENIX === "true" ? "true" : "false";
+process.env.AGENT_STUDIO_LANGSMITH_ENABLED =
+  process.env.AGENT_ACCEPTANCE_LANGSMITH === "true" ? "true" : "false";
 require(root + "/server/node_modules/reflect-metadata");
 const assert = require("node:assert/strict");
 const { randomUUID } = require("node:crypto");
@@ -35,7 +35,7 @@ let acceptanceStage = "configuration";
   const workspaceId = Number(process.env.AGENT_ACCEPTANCE_WORKSPACE_ID ?? 1);
   assert.ok(Number.isSafeInteger(workspaceId) && workspaceId > 0);
   const tracing =
-    process.env.AGENT_ACCEPTANCE_PHOENIX === "true"
+    process.env.AGENT_ACCEPTANCE_LANGSMITH === "true"
       ? new ExecutionTracingService(config)
       : undefined;
   try {
@@ -190,33 +190,12 @@ let acceptanceStage = "configuration";
           acceptanceStage = "trace_export";
           assert.equal(await tracing.flush(), true);
           assert.equal(tracing.metrics.failed, 0);
-          const base = config.tracing.endpoint
-            .replace(/\/v1\/traces\/?$/, "")
-            .replace(/\/$/, "");
-          let rows = [];
-          for (let attempt = 0; attempt < 20; attempt++) {
-            const response = await fetch(
-              `${base}/v1/projects/${encodeURIComponent(config.tracing.project)}/spans?limit=1000&trace_id=${traceLink.traceId}`,
-              {
-                signal: AbortSignal.timeout(3000),
-                headers: config.tracing.apiKey
-                  ? { Authorization: `Bearer ${config.tracing.apiKey}` }
-                  : {},
-              },
-            );
-            if (response.ok) rows = (await response.json()).data;
-            if (
-              rows.some((span) => span.name === "deep_agent") &&
-              rows.some((span) => span.name === "agent_request")
-            )
-              break;
-            await new Promise((resolve) => setTimeout(resolve, 500));
-          }
+          const rows = await require("./langsmith-readback.cjs").readStoredTrace(config.tracing, traceLink, ["deep_agent", "model_attempt"]);
           acceptanceStage = "trace_agent_kind";
           assert.ok(
             rows.some(
               (span) =>
-                span.name === "deep_agent" && span.span_kind === "AGENT",
+                span.name === "deep_agent" && span.run_type === "chain",
             ),
           );
           acceptanceStage = "trace_models";

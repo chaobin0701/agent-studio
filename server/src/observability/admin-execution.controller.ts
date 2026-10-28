@@ -5,6 +5,7 @@ import {
   Get,
   NotFoundException,
   Param,
+  Optional,
   ParseUUIDPipe,
   Query,
   Req,
@@ -17,7 +18,7 @@ import type { AdminRequest } from "../admin/admin.types";
 import { DatabaseService } from "../database.service";
 import { AppConfigService } from "../config/config.service";
 import { executionContextView } from "./execution-view";
-import { recordedPhoenixLink } from "./phoenix-link";
+import { LangSmithLinkService, recordedLangSmithLink } from "./langsmith-link";
 
 const columns = `id, kind, conversation_id AS "conversationId", question, final_answer AS "finalAnswer", refused, status, error_code AS "errorCode", input_tokens AS "inputTokens", output_tokens AS "outputTokens", total_tokens AS "totalTokens", duration_ms AS "durationMs", created_at AS "createdAt"`;
 function integer(value: string | undefined, defaultValue: number, max: number) {
@@ -39,6 +40,7 @@ export class AdminExecutionController {
   constructor(
     private readonly database: DatabaseService,
     private readonly config: AppConfigService,
+    @Optional() private readonly externalLinks?: LangSmithLinkService,
   ) {}
 
   @Get()
@@ -141,19 +143,21 @@ export class AdminExecutionController {
     return { conversation, items: items.rows, total: count?.total ?? 0, page: currentPage, pageSize: size };
   }
 
-  @Get(":id/phoenix")
+  @Get(":id/external-trace")
   @RequirePermission("observability.external.read")
   async external(
     @Param("id", ParseUUIDPipe) id: string,
     @Req() request: AdminRequest,
   ) {
-    // One local Phoenix collector can span multiple application workspaces. Link access
+    // External tracing can span multiple application workspaces. Link access
     // requires a global grant AND the selected workspace's trace-read grant.
     if (!request.workspacePermissionCodes?.includes("conversations.read"))
       throw new ForbiddenException("没有此工作空间的执行记录权限");
     const row = await this.find(id);
     const snapshot = row.contextSnapshot as Record<string, unknown> | null;
-    return recordedPhoenixLink(snapshot?.phoenix, this.config.tracing);
+    return this.externalLinks
+      ? this.externalLinks.resolve(snapshot?.externalTrace)
+      : recordedLangSmithLink(snapshot?.externalTrace, this.config.tracing);
   }
 
   private async find(id: string) {

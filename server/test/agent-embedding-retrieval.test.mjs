@@ -1,4 +1,5 @@
-import { collectPhoenixSpans } from "./helpers/phoenix-collector.mjs";
+import { TestExecutionTracer } from "./helpers/trace-collector.mjs";
+import { collectOtlpSpans } from "./helpers/trace-collector.mjs";
 import "reflect-metadata";
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -12,7 +13,6 @@ import { agentRetrievalSchema } from "../dist/documents/knowledge-config.js";
 import { assertIndexCompatible } from "../dist/documents/index-compatibility.js";
 import { ToolExecutionService } from "../dist/ai/tools/tool-execution.js";
 import { ToolPolicy } from "../dist/ai/tools/tool-policy.js";
-import { PhoenixExecutionTracer } from "../dist/observability/execution-tracer.js";
 import { agentSchema } from "../dist/agent-management/resource.types.js";
 
 test("new Agents default to fulltext while historical auto policies remain readable", () => {
@@ -371,9 +371,9 @@ test("knowledge execution traces retain effective modes and fallback reasons but
 
 test("traced multi-library retrieval shares one embedding and exports only recall/fusion metadata", async (t) => {
   const exported = [];
-  const tracer = new PhoenixExecutionTracer(
+  const tracer = new TestExecutionTracer(
     { enabled: true, project: "fixture" },
-    collectPhoenixSpans(exported),
+    collectOtlpSpans(exported),
   );
   t.mock.method(globalThis, "fetch", async () =>
     Response.json({ data: [{ index: 0, embedding: [1, 0] }] }),

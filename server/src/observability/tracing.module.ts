@@ -6,11 +6,12 @@ import {
 } from "@nestjs/common";
 import { ConfigModule } from "../config/config.module";
 import { AppConfigService } from "../config/config.service";
-import { PhoenixExecutionTracer } from "./execution-tracer";
+import { LangSmithLinkService } from "./langsmith-link";
+import { LangSmithExecutionTracer } from "./execution-tracer";
 
 @Injectable()
 export class ExecutionTracingService
-  extends PhoenixExecutionTracer
+  extends LangSmithExecutionTracer
   implements OnApplicationShutdown
 {
   constructor(config: AppConfigService) {
@@ -24,7 +25,7 @@ export class ExecutionTracingService
 @Global()
 @Module({
   imports: [ConfigModule],
-  providers: [ExecutionTracingService],
-  exports: [ExecutionTracingService],
+  providers: [ExecutionTracingService, LangSmithLinkService],
+  exports: [ExecutionTracingService, LangSmithLinkService],
 })
 export class TracingModule {}

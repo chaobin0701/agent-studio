@@ -1,12 +1,12 @@
+import { TestExecutionTracer } from "./helpers/trace-collector.mjs";
 import {
-  decodePhoenixRequest,
+  decodeOtlpRequest,
   emptyOtlpResponse,
 } from "./helpers/otlp-wire.mjs";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createServer } from "node:http";
 import {
-  PhoenixExecutionTracer,
   safeTraceMetadata,
   executionSpan,
 } from "../dist/observability/execution-tracer.js";
@@ -24,7 +24,7 @@ function collector() {
   const requests = [],
     spans = [];
   const fetcher = async (url, options) => {
-    const body = decodePhoenixRequest(options.body);
+    const body = decodeOtlpRequest(options.body);
     requests.push({ url, body });
     for (const resource of body.resourceSpans)
       for (const scope of resource.scopeSpans)
@@ -43,42 +43,19 @@ function collector() {
   return { requests, spans, fetcher };
 }
 
-test("Phoenix config defaults local; cloud/credentials/redirects and invalid limits are rejected", () => {
-  assert.equal(readTracingEnvironment({}).enabled, true);
-  assert.equal(
-    readTracingEnvironment({}).endpoint,
-    "http://127.0.0.1:6006/v1/traces",
-  );
-  assert.equal(
-    readTracingEnvironment({ PHOENIX_TRACING: "false" }).enabled,
-    false,
-  );
-  assert.equal(
-    readTracingEnvironment({
-      PHOENIX_COLLECTOR_ENDPOINT: "http://phoenix:6006/v1/traces",
-    }).enabled,
-    true,
-  );
-  for (const value of [
-    "https://app.phoenix.arize.com",
-    "https://example.org",
-    "http://user:secret@localhost:6006",
-    "http://localhost:6006?redirect=bad",
-    "http://169.254.169.254",
-    "file:///tmp/traces",
-  ])
-    assert.throws(
-      () => readTracingEnvironment({ PHOENIX_COLLECTOR_ENDPOINT: value }),
-      /endpoint/,
-    );
-  assert.throws(
-    () => readTracingEnvironment({ PHOENIX_SAMPLE_RATE: "2" }),
-    /sampleRate/,
-  );
-  assert.throws(
-    () => readTracingEnvironment({ PHOENIX_TIMEOUT_MS: "0" }),
-    /timeoutMs/,
-  );
+test("LangSmith config defaults disabled and rejects missing credentials, bad routes and limits", () => {
+  assert.equal(readTracingEnvironment({}).enabled, false);
+  assert.equal(readTracingEnvironment({}).contentEnabled, false);
+  assert.equal(readTracingEnvironment({}).endpoint,"https://api.smith.langchain.com");
+  assert.equal(readTracingEnvironment({LANGSMITH_TRACING:"true",PHOENIX_TRACING:"true"}).enabled,false);
+  assert.throws(()=>readTracingEnvironment({AGENT_STUDIO_LANGSMITH_ENABLED:"true"}),/apiKey|project/);
+  const env={AGENT_STUDIO_LANGSMITH_ENABLED:"true",AGENT_STUDIO_LANGSMITH_API_KEY:"fixture",AGENT_STUDIO_LANGSMITH_PROJECT:"acceptance"};
+  assert.equal(readTracingEnvironment(env).enabled,true);
+  assert.equal(readTracingEnvironment({...env,AGENT_STUDIO_LANGSMITH_CONTENT_ENABLED:"true"}).contentEnabled,true);
+  for (const endpoint of ["http://public.example","https://user:secret@example.com","https://example.com?key=secret","file:///tmp/traces"])
+    assert.throws(()=>readTracingEnvironment({...env,AGENT_STUDIO_LANGSMITH_ENDPOINT:endpoint}),/endpoint/);
+  for (const [key,value] of [["SAMPLE_RATE","2"],["TIMEOUT_MS","0"],["QUEUE_LIMIT","0"]])
+    assert.throws(()=>readTracingEnvironment({...env,["AGENT_STUDIO_LANGSMITH_"+key]:value}));
   const safe = safeTraceMetadata({
     agentVersionId: 12,
     inputTokens: 34,
@@ -98,9 +75,9 @@ test("Phoenix config defaults local; cloud/credentials/redirects and invalid lim
   });
 });
 
-test("real Phoenix SDK / OTLP serializer preserves concurrent parents, OpenInference semantics and local IDs without bodies", async () => {
+test("private OTEL provider / OTLP serializer preserves concurrent parents, OpenInference semantics and local IDs without bodies", async () => {
   const c = collector(),
-    tracer = new PhoenixExecutionTracer(
+    tracer = new TestExecutionTracer(
       { enabled: true, project: "acceptance" },
       c.fetcher,
     );
@@ -145,9 +122,10 @@ test("real Phoenix SDK / OTLP serializer preserves concurrent parents, OpenInfer
   for (const r of roots) {
     assert.match(r.id, /^[a-f0-9]{16}$/);
     assert.match(r.traceId, /^[a-f0-9]{32}$/);
-    assert.equal(tracer.link(r).project, "acceptance");
+    assert.equal(tracer.link(r).provider, "langsmith");
+    assert.match(tracer.link(r).runId, /^[a-f0-9-]{36}$/);
   }
-  assert.equal(c.requests[0].url, "http://127.0.0.1:6006/v1/traces");
+  assert.equal(c.requests[0].url, "https://api.smith.langchain.com/otel/v1/traces");
   assert.equal(
     c.requests[0].body.resourceSpans[0].resource.attributes.find(
       (a) => a.key === "openinference.project.name",
@@ -162,7 +140,7 @@ test("real Phoenix SDK / OTLP serializer preserves concurrent parents, OpenInfer
 });
 
 test("transport failure and a blocked bounded queue never fail or wait on Agent execution", async () => {
-  const failing = new PhoenixExecutionTracer({ enabled: true }, async () => {
+  const failing = new TestExecutionTracer({ enabled: true }, async () => {
     throw new Error("PRIVATE_VENDOR");
   });
   assert.equal(await failing.span("root", "chain", {}, async () => 42), 42);
@@ -170,7 +148,7 @@ test("transport failure and a blocked bounded queue never fail or wait on Agent 
   assert.equal(failing.metrics.failed, 1);
   await failing.close();
   let release;
-  const blocked = new PhoenixExecutionTracer(
+  const blocked = new TestExecutionTracer(
     { enabled: true, queueLimit: 2 },
     () =>
       new Promise((resolve) => {
@@ -190,7 +168,7 @@ test("transport failure and a blocked bounded queue never fail or wait on Agent 
 
 test("safe error classifications and annotated tool failures preserve the original exception", async () => {
   const c = collector(),
-    tracer = new PhoenixExecutionTracer({ enabled: true }, c.fetcher);
+    tracer = new TestExecutionTracer({ enabled: true }, c.fetcher);
   const error = Object.assign(new Error("PRIVATE_KEY=secret"), {
     code: "provider_timeout",
   });
@@ -225,7 +203,7 @@ test("safe error classifications and annotated tool failures preserve the origin
 
 test("native human waits export only a waiting status without failed spans or private interaction state", async () => {
   const c = collector();
-  const tracer = new PhoenixExecutionTracer({ enabled: true }, c.fetcher);
+  const tracer = new TestExecutionTracer({ enabled: true }, c.fetcher);
   const suspended = new InteractionSuspension({ kind: "question", question: "PRIVATE_QUESTION",
     options: [{ id: "a", label: "PRIVATE_OPTION" }], allowCustom: true },
     "PRIVATE_INTERRUPT", { harness: { secret: "PRIVATE_CHECKPOINT" } });
@@ -251,7 +229,7 @@ test("native human waits export only a waiting status without failed spans or pr
 
 test("actual Deep Agents interruption keeps automatic framework spans out of the failure path", async () => {
   const c = collector();
-  const tracer = new PhoenixExecutionTracer({ enabled: true }, c.fetcher);
+  const tracer = new TestExecutionTracer({ enabled: true }, c.fetcher);
   const f = nativeChat({ tracing: tracer, tools: [new AskUserTool()], respond: () => ({
     content: "", toolCalls: [{ id: "question", name: "ask_user", arguments: {
       question: "PRIVATE_QUESTION_BODY", options: [{ id: "one", label: "PRIVATE_OPTION_BODY" }], allowCustom: true,
@@ -270,13 +248,13 @@ test("actual Deep Agents interruption keeps automatic framework spans out of the
   } finally { await tracer.close(); }
 });
 
-test("local tracing needs no API key; disabled and zero sampling export nothing", async () => {
+test("explicit test tracing works; disabled and zero sampling export nothing", async () => {
   const c = collector();
   for (const options of [
     { enabled: false },
     { enabled: true, sampleRate: 0 },
   ]) {
-    const tracer = new PhoenixExecutionTracer(options, c.fetcher);
+    const tracer = new TestExecutionTracer(options, c.fetcher);
     await tracer.span("root", "chain", {}, async (span) => {
       assert.equal(tracer.link(span).enabled, false);
       await tracer.span("child", "tool", {}, async () => {});
@@ -284,7 +262,7 @@ test("local tracing needs no API key; disabled and zero sampling export nothing"
     await tracer.close();
   }
   assert.equal(c.requests.length, 0);
-  const tracer = new PhoenixExecutionTracer({ enabled: true }, c.fetcher);
+  const tracer = new TestExecutionTracer({ enabled: true }, c.fetcher);
   await tracer.span("root", "chain", {}, async (span) =>
     assert.equal(tracer.link(span).enabled, true),
   );
@@ -326,8 +304,8 @@ test("real local HTTP export ignores ambient cloud endpoint/headers, times out a
   const bodies = [],
     headers = [];
   const server = createServer((req, res) => {
-    if (req.url === "/hang/v1/traces") return;
-    if (req.url === "/redirect/v1/traces") {
+    if (req.url === "/hang/otel/v1/traces") return;
+    if (req.url === "/redirect/otel/v1/traces") {
       res.writeHead(302, { location: "https://example.invalid/v1/traces" });
       res.end();
       return;
@@ -335,7 +313,7 @@ test("real local HTTP export ignores ambient cloud endpoint/headers, times out a
     const data = [];
     req.on("data", (x) => data.push(x));
     req.on("end", () => {
-      bodies.push(decodePhoenixRequest(Buffer.concat(data)));
+      bodies.push(decodeOtlpRequest(Buffer.concat(data)));
       headers.push(req.headers);
       res.setHeader("Content-Type", "application/x-protobuf");
       res.end();
@@ -349,7 +327,7 @@ test("real local HTTP export ignores ambient cloud endpoint/headers, times out a
   process.env.OTEL_EXPORTER_OTLP_HEADERS =
     "Authorization=Bearer AMBIENT_SECRET";
   try {
-    const tracer = new PhoenixExecutionTracer({
+    const tracer = new TestExecutionTracer({
       enabled: true,
       endpoint: base,
       apiKey: "LOCAL_AUTH",
@@ -362,14 +340,14 @@ test("real local HTTP export ignores ambient cloud endpoint/headers, times out a
     );
     await tracer.flush();
     assert.equal(tracer.metrics.exported, 1);
-    assert.equal(headers[0].authorization, "Bearer LOCAL_AUTH");
+    assert.equal(headers[0]["x-api-key"], "LOCAL_AUTH");
     assert.doesNotMatch(
       JSON.stringify(bodies),
       /PRIVATE|LOCAL_AUTH|AMBIENT_SECRET/,
     );
     await tracer.close();
     for (const path of ["hang", "redirect"]) {
-      const failing = new PhoenixExecutionTracer({
+      const failing = new TestExecutionTracer({
         enabled: true,
         endpoint: `${base}/${path}`,
         timeoutMs: 100,
@@ -392,7 +370,7 @@ test("real local HTTP export ignores ambient cloud endpoint/headers, times out a
 
 test("actual model retries, tool attempts and retriever/embedding spans belong to their graph, no double invocation", async () => {
   const c = collector(),
-    tracer = new PhoenixExecutionTracer({ enabled: true }, c.fetcher);
+    tracer = new TestExecutionTracer({ enabled: true }, c.fetcher);
   let calls = 0;
   const llm = new LlmService({
     model: "fixture",

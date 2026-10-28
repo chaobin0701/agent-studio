@@ -1,5 +1,7 @@
 # 本地 Phoenix 执行追踪
 
+> 2026-10-28：当前追踪出口已迁移到 LangSmith，配置与验收入口见 [LangSmith 追踪](langsmith-tracing.md)。本文中的 Phoenix 入库数量和命令属于历史验收记录，不代表当前配置。
+
 ## 边界
 
 本次仅将应用追踪适配器替换为 Arize Phoenix。**LangGraph、Agent／Prompt／Skill／Tool／MCP／模型／知识库管理、发布版本、本地 Trace、审计与模型调用计费保持不变**。Phoenix 不接管资源配置，不建立新的执行循环，不增加业务重试或模型调用。

@@ -17,7 +17,7 @@
 
 ## 设计边界
 
-工具只执行能力并返回结构化结果，不生成最终答案；最终回答目前只做基础格式校验。模型调用由 Provider 负责，调用循环与节点路由由 Deep Agents / LangChain 原生执行器负责；工具执行的通用限制由 Tool Runtime 负责，配置来源为请求固定的 Agent / Tool 版本及 runtime 参数。图节点不能额外重试工具，以免重放写操作；模型、工具实际尝试通过统一 metadata-only 追踪接口记录，不能导出参数和返回正文。Skill 仅为已授权的只读指导，不创建隔离执行 Agent；成员委派由原生子 Agent 中间件负责，不能通过工具上下文注入递归执行函数。
+工具只执行能力并返回结构化结果，不生成最终答案；最终回答目前只做基础格式校验。模型调用由 Provider 负责，调用循环与节点路由由 Deep Agents / LangChain 原生执行器负责；工具执行的通用限制由 Tool Runtime 负责，配置来源为请求固定的 Agent / Tool 版本及 runtime 参数。图节点不能额外重试工具，以免重放写操作；模型、工具实际尝试通过统一追踪接口记录。元数据保持 allowlist；只有 `AGENT_STUDIO_LANGSMITH_CONTENT_ENABLED=true` 时，才将已脱敏的 Tool 参数和结果写入独立内容字段。Skill 仅为已授权的只读指导，不创建隔离执行 Agent；成员委派由原生子 Agent 中间件负责，不能通过工具上下文注入递归执行函数。
 
 `search_knowledge` 和 `load_skill` 是代码维护的基础能力，不出现在管理工具列表和选择项中，不允许通过资源配置创建、替换或停用。每个 Agent 请求自动装配代码实现；历史 Tool 绑定只保留引用，不再控制这两个实现。工具可调用不代表资源授权：知识检索只访问 Agent 授权的知识库，Skill 加载只访问请求已授权的 Skill。原生 Skill 目录按需读取；历史 `run_skill` / `delegate_agent` 名称继续保留，但不注册工具或执行回调，不进入新快照。
 

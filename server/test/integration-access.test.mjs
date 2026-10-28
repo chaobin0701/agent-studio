@@ -1,5 +1,6 @@
 import { AdminExecutionController } from "../dist/observability/admin-execution.controller.js";
-import { phoenixTraceUrl } from "../dist/observability/phoenix-link.js";
+import { normalizeTracingOptions } from "../dist/config/tracing-config.js";
+import { destinationId, configuredTraceUrl } from "../dist/observability/trace-mapping.js";
 import { AgentManagementService } from "../dist/agent-management/agent-management.service.js";
 import { ToolRegistry } from "../dist/ai/tools/tool-registry.js";
 import { SkillRegistry } from "../dist/ai/skills/skill-registry.js";
@@ -213,11 +214,11 @@ test(
         const config = {
           jwt: { issuer: "fixture", audience: "fixture-admin" },
           security: { allowedOrigins: ["https://shop.example"] },
-          tracing: {
-            enabled: true,
-            webUrl: "http://127.0.0.1:6006",
-            project: "acceptance",
-          },
+          tracing: normalizeTracingOptions({
+            enabled: true, apiKey: "fixture", project: "acceptance",
+            workspaceId: "11111111-1111-4111-8111-111111111111",
+            projectId: "22222222-2222-4222-8222-222222222222",
+          }),
         };
         const jwt = new JwtService({
           secret: "isolated-test-secret-never-for-production-32",
@@ -476,22 +477,22 @@ test(
         });
 
         await t.test(
-          "execution views and private Phoenix links enforce real HTTP permissions and workspace RLS",
+          "execution views and private LangSmith links enforce real HTTP permissions and workspace RLS",
           async () => {
             const localId = randomUUID(),
               otherId = randomUUID(),
               cloudTraceId = "33333333333343338333333333333333";
-            const cloudUrl = phoenixTraceUrl(config.tracing, cloudTraceId);
+            const cloudRunId = "33333333-3333-4333-8333-333333333333";
+            const cloudUrl = configuredTraceUrl(config.tracing, cloudRunId);
             const context = {
               executionEngine: "langgraph",
               agentComposition: { agentId: fixtureAgent },
               systemPrompt: "PRIVATE_PROMPT",
-              phoenix: {
+              externalTrace: {
                 enabled: true,
                 traceId: cloudTraceId,
-                project: "acceptance",
-                runId: cloudTraceId,
-                url: cloudUrl,
+                schemaVersion: 1, provider: "langsmith",
+                runId: cloudRunId, destination: destinationId(config.tracing),
               },
             };
             await db.platformQuery(
@@ -526,7 +527,7 @@ test(
             );
             assert.equal(
               (
-                await http(`/admin/executions/${otherId}/phoenix`, {
+                await http(`/admin/executions/${otherId}/external-trace`, {
                   token: adminToken,
                 })
               ).status,
@@ -550,7 +551,7 @@ test(
               /PRIVATE_PROMPT|smith\.langchain|runId/,
             );
             const externalLink = await (
-              await http(`/admin/executions/${localId}/phoenix`, {
+              await http(`/admin/executions/${localId}/external-trace`, {
                 token: adminToken,
               })
             ).json();
@@ -569,7 +570,7 @@ test(
             );
             assert.equal(
               (
-                await http(`/admin/executions/${localId}/phoenix`, {
+                await http(`/admin/executions/${localId}/external-trace`, {
                   token: readerToken,
                 })
               ).status,
@@ -581,7 +582,7 @@ test(
             );
             assert.equal(
               (
-                await http(`/admin/executions/${localId}/phoenix`, {
+                await http(`/admin/executions/${localId}/external-trace`, {
                   token: adminToken,
                 })
               ).status,
@@ -990,10 +991,11 @@ test(
               name: "no-usage",
               scopes: ["chat:write"],
             });
-            assert.equal(
-              (await http("/v1/agent/usage", { token: noUsage.apiKey })).status,
-              403,
-            );
+            // Usage reads are automatic for authenticated app credentials;
+            // the retired usage:read setting must not gate this endpoint.
+            const automaticUsage = await http("/v1/agent/usage", { token: noUsage.apiKey });
+            assert.equal(automaticUsage.status, 200);
+            assert.equal((await automaticUsage.json()).scope, "application");
             assert.equal(
               (await http("/v1/agent/status", { token: noUsage.apiKey }))
                 .status,

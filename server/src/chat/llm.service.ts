@@ -24,7 +24,9 @@ import { reserveModelCall } from "./model-call-accounting";
 import {
   executionSpan,
   annotateExecution,
+  annotateTraceContent,
 } from "../observability/execution-tracer";
+import { traceModelRequest } from "../observability/trace-content";
 
 import { measureModelContext, type ModelContextUsage } from "./context-governor";
 
@@ -416,7 +418,14 @@ export class LlmService {
             fallback: candidate.deploymentId !== schedule[0]?.deploymentId,
           },
           async () => {
+            annotateTraceContent({ input: traceModelRequest(request) });
             const value = await provider.chat(request);
+            annotateTraceContent({
+              output: {
+                content: value.content,
+                toolCalls: value.toolCalls,
+              },
+            });
             annotateExecution({
               ...value.usage,
               finishReason: value.finishReason,
@@ -715,6 +724,7 @@ export class LlmService {
             fallback: candidate.deploymentId !== schedule[0]?.deploymentId,
           },
           async () => {
+            annotateTraceContent({ input: traceModelRequest(request) });
             for await (const event of provider.stream(request)) {
               if (completed)
                 throw new ModelStreamProtocolError("event_after_completion");
@@ -798,6 +808,7 @@ export class LlmService {
               throw new ModelStreamProtocolError("invalid_tool_finish_reason");
             if (!toolCalls.length && finishReason === "tool_calls")
               throw new ModelStreamProtocolError("missing_tool_calls");
+            annotateTraceContent({ output: { content, toolCalls } });
             annotateExecution({ ...usage, finishReason });
             return toolCalls;
           },

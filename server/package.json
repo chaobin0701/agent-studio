@@ -19,14 +19,13 @@
     "verify:deep-agent:live": "npm run build && node scripts/verify-deep-agent-live.cjs",
     "verify:model-sdk:live": "npm run build && node scripts/verify-model-sdk-live.cjs",
     "verify:files:live": "npm run build && node scripts/verify-agent-live.cjs --files-only",
-    "verify:phoenix": "npm run build && node scripts/verify-phoenix.cjs"
+    "verify:langsmith": "npm run build && node scripts/verify-langsmith.cjs"
   },
   "dependencies": {
     "@agent-studio/output-contract": "file:../packages/output-contract",
     "@arizeai/openinference-core": "2.8.0",
     "@arizeai/openinference-instrumentation-langchain": "4.1.4",
     "@arizeai/openinference-semantic-conventions": "2.14.0",
-    "@arizeai/phoenix-otel": "2.2.0",
     "@inquirer/prompts": "^8.7.2",
     "@langchain/core": "1.2.17",
     "@langchain/langgraph": "1.5.0",
@@ -39,6 +38,7 @@
     "@nestjs/platform-express": "^12.0.3",
     "@opentelemetry/api": "1.9.1",
     "@opentelemetry/otlp-transformer": "0.223.0",
+    "@opentelemetry/resources": "2.12.0",
     "@opentelemetry/sdk-trace-base": "2.12.0",
     "ajv": "8.20.0",
     "bcryptjs": "^3.0.3",

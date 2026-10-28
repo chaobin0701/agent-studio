@@ -1,5 +1,7 @@
 # 通用 Agent 平台：架构与交付边界
 
+> 2026-10-28：当前追踪出口已迁移到 LangSmith，配置与验收入口见 [LangSmith 追踪](langsmith-tracing.md)。本文中的 Phoenix 入库数量和命令属于历史验收记录，不代表当前配置。
+
 ## 定位
 
 **借助 LangChain、Deep Agents、LangGraph 与本地 Phoenix 系统性重构平台，不以旧单 Agent / 客服架构为中心，也不以局部兼容改造为最终交付。**

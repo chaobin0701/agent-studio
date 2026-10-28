@@ -1,3 +1,4 @@
+import { TestExecutionTracer } from "./helpers/trace-collector.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
@@ -14,8 +15,7 @@ import {
   ProviderInvalidRequestError,
 } from "../dist/ai/providers/provider-errors.js";
 import { llmDeploymentSchema } from "../dist/model-management/model-management.types.js";
-import { collectPhoenixSpans } from "./helpers/phoenix-collector.mjs";
-import { PhoenixExecutionTracer } from "../dist/observability/execution-tracer.js";
+import { collectOtlpSpans } from "./helpers/trace-collector.mjs";
 import { LlmService } from "../dist/chat/llm.service.js";
 
 const configuration = {
@@ -470,9 +470,9 @@ test("fresh SDK process suppresses ambient LangSmith/SDK logs/org/project/base U
 
 test("SDK generations retain one authoritative model span per HTTP attempt and record the real adapter version", async (t) => {
   const spans = [],
-    tracer = new PhoenixExecutionTracer(
+    tracer = new TestExecutionTracer(
       { enabled: true, project: "sdk-adapter-acceptance" },
-      collectPhoenixSpans(spans),
+      collectOtlpSpans(spans),
     );
   const provider = new LangChainOpenAIProvider(configuration),
     llm = new LlmService(provider);
@@ -556,9 +556,9 @@ test("SDK generations retain one authoritative model span per HTTP attempt and r
 
 test("host-validated image input reaches the SDK wire without native message mutation or body tracing", async (t) => {
   const spans = [],
-    tracer = new PhoenixExecutionTracer(
+    tracer = new TestExecutionTracer(
       { enabled: true, project: "image-acceptance" },
-      collectPhoenixSpans(spans),
+      collectOtlpSpans(spans),
     );
   const image = {
     id: "image-fixture",

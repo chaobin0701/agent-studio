@@ -51,7 +51,7 @@ Agent Studio 由**资产编排层**、**状态执行引擎**与**外部接入网
 
 ### 6. 多租户治理与全链路观测
 * **工作区与权限**：基于 PostgreSQL 行级安全 (RLS) 隔离工作区数据，细粒度 RBAC 权限控制到单项资产的读写与发布。
-* **流式传输与可观测性**：基于标准 SSE 协议输出打字流与思维过程；全链路适配 OpenInference 规范，支持本地 Phoenix 追踪调用图谱与延迟瓶颈。
+* **流式传输与可观测性**：基于标准 SSE 协议输出打字流与思维过程；全链路适配 OpenInference / OpenTelemetry 规范，可显式接入 LangSmith 查看执行树、模型用量与延迟；对话内容追踪独立配置且默认关闭。详见 [LangSmith 追踪](docs/langsmith-tracing.md)。
 
 ---
 

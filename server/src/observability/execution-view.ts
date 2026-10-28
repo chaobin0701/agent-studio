@@ -1,3 +1,4 @@
+import { safeExternalTrace } from "./trace-mapping";
 import { safeToolValidation } from "../ai/tools/tool-validation";
 
 /** Ordinary execution views are an allowlist, not a redacted dump of graph state.
@@ -284,7 +285,10 @@ export function executionContextView(
         scalarFields(item, ["id", "kind", "title"]),
       ),
     },
-    externalTrace: { sampled: object(context.phoenix).enabled === true },
+    externalTrace: {
+      sampled: safeExternalTrace(context.externalTrace)?.enabled === true,
+      provider: safeExternalTrace(context.externalTrace)?.provider ?? (context.phoenix ? "phoenix" : null),
+    },
   };
 }
 
@@ -292,7 +296,9 @@ export function omitExternalTraceLinks(
   value: unknown,
   depth = 0,
 ): Record<string, unknown> {
-  const { phoenix: _link, langSmith: _legacyLink, ...context } = object(value);
+  const {
+    externalTrace: _external, phoenix: _link, langSmith: _legacyLink, ...context
+  } = object(value);
   if (depth >= 3) {
     delete context.specialistTasks;
     return context;

@@ -1,3 +1,4 @@
+import { TestExecutionTracer } from "./helpers/trace-collector.mjs";
 import "reflect-metadata";
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -12,7 +13,6 @@ import { SpecializedWorkflowRegistry } from "../dist/ai/workflows/specialized-wo
 import { textSummary } from "../dist/ai/workflows/text-summary.js";
 import { makeManagedTool } from "../dist/agent-management/managed-tool.js";
 import { toolSchema } from "../dist/agent-management/resource.types.js";
-import { PhoenixExecutionTracer } from "../dist/observability/execution-tracer.js";
 import { executionContextView } from "../dist/observability/execution-view.js";
 import { nativeChat } from "./helpers/native-chat.mjs";
 const { Annotation, StateGraph, START, END } = createRequire(import.meta.url)(
@@ -157,7 +157,7 @@ function fixture({
     access,
     native.llm,
     native.gateway,
-    new PhoenixExecutionTracer({ enabled: false }),
+    new TestExecutionTracer({ enabled: false }),
   );
   const body = {
     contextFingerprint: workflowContextFingerprint(

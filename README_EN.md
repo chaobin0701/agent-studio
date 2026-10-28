@@ -51,7 +51,7 @@ Agent Studio connects asset orchestration, stateful execution, and external cons
 
 ### 6. Multi-Tenant Governance & Full-Stack Observability
 * **Workspace Isolation**: Data isolation enforced at the database level via PostgreSQL Row-Level Security (RLS), with fine-grained RBAC permissions down to individual asset operations.
-* **Streaming & Tracing**: Native Server-Sent Events (SSE) stream tokens and reasoning thoughts in real time. Full instrumentation follows the OpenInference specification, supporting local Phoenix dashboards for trace and latency inspection.
+* **Streaming & Tracing**: Native Server-Sent Events (SSE) stream tokens and reasoning thoughts in real time. Explicit OpenInference / OpenTelemetry instrumentation supports LangSmith execution trees, usage and latency inspection; content tracing is separately configured and disabled by default. See [LangSmith tracing](docs/langsmith-tracing.md).
 
 ---
 

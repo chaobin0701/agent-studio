@@ -1,5 +1,7 @@
 # 独立 Agent Run 接口
 
+> 2026-10-28：当前追踪出口已迁移到 LangSmith，配置与验收入口见 [LangSmith 追踪](langsmith-tracing.md)。本文中的 Phoenix 入库数量和命令属于历史验收记录，不代表当前配置。
+
 独立任务入口不创建隐式会话，不依赖浏览器 Cookie、客服、产品或知识库。它与所有 Chat 执行路径复用 `AgentExecutionService → DeepAgentExecutionService → Deep Agents / LangChain / LangGraph`、发布快照、能力授权、模型尝试账本和接入应用准入；不是另一套 Agent 内核。开发位于独立 worktree，主项目尚未切换；静态执行回退、旧运行时注册及全部重复通用内核源码/测试参考已清理，见 [Chat 入口](native-chat-entry.md)。
 
 ## 调用与权限

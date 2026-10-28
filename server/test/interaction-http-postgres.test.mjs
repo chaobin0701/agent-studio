@@ -1,3 +1,4 @@
+import { TestExecutionTracer } from "./helpers/trace-collector.mjs";
 import "reflect-metadata";
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -40,7 +41,6 @@ import { InMemoryMessageBus } from "../dist/message-bus/in-memory-message-bus.js
 import { SecurityRateLimitService } from "../dist/security/security-rate-limit.service.js";
 import { RequestContextMiddleware } from "../dist/security/request-context.middleware.js";
 import { HttpExceptionFilter } from "../dist/security/http-exception.filter.js";
-import { PhoenixExecutionTracer } from "../dist/observability/execution-tracer.js";
 
 // Uses only the explicitly supplied disposable database. The actual controllers,
 // admission/accounting, published-resource resolver and native Deep Agents run;
@@ -51,7 +51,7 @@ test("HTTP human interactions persist and resume actual Run/legacy execution wit
 }, async (t) => inWorkspace(1, async () => {
   const schema = `interaction_http_${randomUUID().replaceAll("-", "")}`;
   const admin = new pg.Client({ connectionString: process.env.TEST_DATABASE_URL });
-  const tracer = new PhoenixExecutionTracer({ enabled: false, project: "interaction-http-fixture" });
+  const tracer = new TestExecutionTracer({ enabled: false, project: "interaction-http-fixture" });
   let db, app;
   await admin.connect();
   try {

@@ -422,7 +422,7 @@ export class WorkflowTestService {
         "chain",
         versions,
         async (span) => {
-          context.phoenix = this.tracing.link(span);
+          context.externalTrace = this.tracing.link(span);
           const outcome = await runtimeScope.run(scope, () =>
             this.llm.withPinnedModelPlan(agent.modelPlan, () =>
               withModelCallAccounting(

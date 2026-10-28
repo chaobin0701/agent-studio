@@ -1,3 +1,4 @@
+import { TestExecutionTracer } from "./helpers/trace-collector.mjs";
 import "reflect-metadata";
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -5,7 +6,6 @@ import { z } from "zod";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { McpClientAdapter } from "../dist/ai/mcp/mcp-client.adapter.js";
 import { adaptMcpTool } from "../dist/ai/mcp/mcp-tool.adapter.js";
-import { PhoenixExecutionTracer } from "../dist/observability/execution-tracer.js";
 import { ToolExecutionService } from "../dist/ai/tools/tool-execution.js";
 import { ToolPolicy } from "../dist/ai/tools/tool-policy.js";
 import { ToolRegistry } from "../dist/ai/tools/tool-registry.js";
@@ -13,15 +13,15 @@ import { nativeChat } from "./helpers/native-chat.mjs";
 import { AgentExecutionService } from "../dist/ai/runtime/agent-execution.service.js";
 import { DeepAgentExecutionService } from "../dist/ai/deep-agents/deep-agent-execution.service.js";
 import { ManagedDeepAgentHarness } from "../dist/ai/deep-agents/managed-harness.js";
-import { collectPhoenixSpans } from "./helpers/phoenix-collector.mjs";
+import { collectOtlpSpans } from "./helpers/trace-collector.mjs";
 import { LlmService } from "../dist/chat/llm.service.js";
 import { ProviderUnavailableError } from "../dist/ai/providers/provider-errors.js";
 
-test("native MCP and actual model retry/error paths reach Phoenix with version/Run metadata, never arguments or results", async () => {
+test("native MCP and actual model retry/error paths reach LangSmith with version/Run metadata, never arguments or results", async () => {
   const spans = [],
-    tracer = new PhoenixExecutionTracer(
+    tracer = new TestExecutionTracer(
       { enabled: true, project: "fixture" },
-      collectPhoenixSpans(spans),
+      collectOtlpSpans(spans),
     );
   const server = new McpServer({
     name: "local-trace-acceptance",
@@ -82,7 +82,7 @@ test("native MCP and actual model retry/error paths reach Phoenix with version/R
         agentVersionId: 31,
         promptVersionId: 8,
         modelPlanVersionId: 13,
-        localRunId: "phoenix-native-acceptance",
+        localRunId: "langsmith-native-acceptance",
         localTraceId: "local-native-trace",
       },
       limits: { maxDecisions: 2, maxToolCalls: 1 },
@@ -111,7 +111,7 @@ test("native MCP and actual model retry/error paths reach Phoenix with version/R
     assert.equal(attempt.metadata.mcpServerId, 12);
     assert.equal(
       spans.find((s) => s.name === "deep_agent").metadata.localRunId,
-      "phoenix-native-acceptance",
+      "langsmith-native-acceptance",
     );
     assert.ok(spans.every((s) => s.traceId === linked.traceId));
     assert.ok(spans.some((s) => s.status.message === "provider_unavailable"));
@@ -134,6 +134,19 @@ test("native MCP and actual model retry/error paths reach Phoenix with version/R
       spans.find((s) => s.name === "exception_acceptance").status.code,
       2,
     );
+    const failure = spans.find((s) => s.name === "exception_acceptance");
+    assert.equal(failure.events.length, 1);
+    assert.equal(failure.events[0].name, "exception");
+    assert.deepEqual(
+      Object.fromEntries(
+        failure.events[0].attributes.map((a) => [
+          a.key,
+          Object.values(a.value)[0],
+        ]),
+      ),
+      { "exception.message": "tool_timeout" },
+    );
+    assert.doesNotMatch(JSON.stringify(spans), /PRIVATE_/);
   } finally {
     await client.close();
     await tracer.close();
@@ -271,9 +284,9 @@ test("real HTTP Tool and remote MCP are executed by the native Deep Agents loop 
   const runtime = new ToolExecutionService(registry, new ToolPolicy()),
     state = runtime.createState(),
     spans = [];
-  const tracer = new PhoenixExecutionTracer(
+  const tracer = new TestExecutionTracer(
     { enabled: true, project: "fixture" },
-    collectPhoenixSpans(spans),
+    collectOtlpSpans(spans),
   );
   try {
     let requests = 0;
@@ -325,7 +338,7 @@ test("real HTTP Tool and remote MCP are executed by the native Deep Agents loop 
         agentId: 9,
         agentVersionId: 31,
         promptVersionId: 8,
-        localRunId: "phoenix-http-mcp-acceptance",
+        localRunId: "langsmith-http-mcp-acceptance",
       },
       limits: { maxDecisions: 2, maxToolCalls: 2 },
     };
@@ -385,9 +398,9 @@ async function requestWithSummary(failSummary = false) {
     "../dist/ai/providers/provider-errors.js"
   );
   const spans = [],
-    tracer = new PhoenixExecutionTracer(
+    tracer = new TestExecutionTracer(
       { enabled: true, project: "fixture" },
-      collectPhoenixSpans(spans),
+      collectOtlpSpans(spans),
     );
   let release, started, saved, summary;
   const gate = new Promise((resolve) => {
@@ -549,8 +562,25 @@ async function requestWithSummary(failSummary = false) {
     assert.equal(root.metadata.localTraceId, main.traceId);
     assert.equal(graph.parentSpanId, root.spanId);
     assert.equal(child.parentSpanId, root.spanId);
+    assert.equal(
+      child.attributes["langsmith.span.parent_id"],
+      root.attributes["langsmith.span.id"],
+    );
+    assert.equal(
+      child.attributes["langsmith.trace.id"],
+      root.attributes["langsmith.span.id"],
+    );
+    assert.equal(
+      summary.context.externalTrace.rootRunId,
+      root.attributes["langsmith.span.id"],
+    );
+    assert.ok(
+      child.attributes["langsmith.span.dotted_order"].startsWith(
+        root.attributes["langsmith.span.dotted_order"] + ".",
+      ),
+    );
     assert.equal(child.metadata.localTraceId, summary.id);
-    assert.equal(summary.context.phoenix.traceId, root.traceId);
+    assert.equal(summary.context.externalTrace.traceId, root.traceId);
     assert.equal(new Set(spans.map((s) => s.traceId)).size, 1);
     const attempt = spans.find(
       (s) => s.name === "model_attempt" && s.parentSpanId === child.spanId,

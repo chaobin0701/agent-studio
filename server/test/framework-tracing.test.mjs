@@ -1,3 +1,4 @@
+import { TestExecutionTracer } from "./helpers/trace-collector.mjs";
 import "reflect-metadata";
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -6,11 +7,10 @@ import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { Annotation, StateGraph, START, END } from "@langchain/langgraph";
 import {
-  PhoenixExecutionTracer,
   frameworkTracing,
 } from "../dist/observability/execution-tracer.js";
 import { privateFrameworkCallbackHandlers } from "../dist/ai/agent/private-framework-callbacks.js";
-import { collectPhoenixSpans } from "./helpers/phoenix-collector.mjs";
+import { collectOtlpSpans } from "./helpers/trace-collector.mjs";
 
 test("enabled private framework tracing installs no global instrumentation and exports nothing to ambient LangSmith", () => {
   const output = execFileSync(process.execPath, ["--input-type=module", "-e", `
@@ -21,10 +21,10 @@ test("enabled private framework tracing installs no global instrumentation and e
     globalThis.fetch=async()=>{external++;throw Error('Forbidden external trace export');};
     await import('reflect-metadata');
     const {Annotation,StateGraph,START,END}=await import('@langchain/langgraph');
-    const {PhoenixExecutionTracer,frameworkTracing}=await import('./dist/observability/execution-tracer.js');
+    const {LangSmithExecutionTracer,frameworkTracing}=await import('./dist/observability/execution-tracer.js');
     const {privateFrameworkCallbackHandlers}=await import('./dist/ai/agent/private-framework-callbacks.js');
-    const {collectPhoenixSpans}=await import('./test/helpers/phoenix-collector.mjs');
-    const spans=[],tracer=new PhoenixExecutionTracer({enabled:true},collectPhoenixSpans(spans));
+    const {collectOtlpSpans}=await import('./test/helpers/trace-collector.mjs');
+    const spans=[],tracer=new LangSmithExecutionTracer({enabled:true,apiKey:"fixture-key",project:"fixture"},collectOtlpSpans(spans));
     const state=Annotation.Root({text:Annotation()});
     const graph=new StateGraph(state).addNode('normalize',s=>({text:s.text})).addEdge(START,'normalize').addEdge('normalize',END).compile();
     try {
@@ -50,9 +50,9 @@ test("enabled private framework tracing installs no global instrumentation and e
 
 test("raw callback data is discarded before OpenInference SDK storage and before OTEL export", async () => {
   const spans = [],
-    tracer = new PhoenixExecutionTracer(
+    tracer = new TestExecutionTracer(
       { enabled: true, project: "private-framework-test" },
-      collectPhoenixSpans(spans),
+      collectOtlpSpans(spans),
     );
   try {
     await tracer.span(
@@ -110,9 +110,9 @@ test("raw callback data is discarded before OpenInference SDK storage and before
 
 test("actual LangGraph callback trees propagate metadata and remain isolated during parallel requests", async () => {
   const spans = [],
-    tracer = new PhoenixExecutionTracer(
+    tracer = new TestExecutionTracer(
       { enabled: true, project: "parallel-framework-test" },
-      collectPhoenixSpans(spans),
+      collectOtlpSpans(spans),
     );
   const state = Annotation.Root({ value: Annotation() });
   const graph = new StateGraph(state)
@@ -129,7 +129,7 @@ test("actual LangGraph callback trees propagate metadata and remain isolated dur
         tracer.span(
           "test_root",
           "chain",
-          { workspaceId: 1, agentVersionId },
+          { workspaceId: 1, agentVersionId, conversationId: "thread-" + agentVersionId },
           async () => {
             const capture = frameworkTracing(["normalize"]);
             try {
@@ -165,6 +165,11 @@ test("actual LangGraph callback trees propagate metadata and remain isolated dur
           tree.some((s) => s.spanId === span.parentSpanId),
           "every framework parent belongs to this request",
         );
+        assert.equal(span.metadata.thread_id, "thread-" + root.metadata.agentVersionId);
+        assert.equal(span.attributes["langsmith.trace.id"], root.attributes["langsmith.span.id"]);
+        const parent=tree.find(s=>s.spanId===span.parentSpanId);
+        assert.equal(span.attributes["langsmith.span.parent_id"],parent.attributes["langsmith.span.id"]);
+        assert.ok(span.attributes["langsmith.span.dotted_order"].startsWith(parent.attributes["langsmith.span.dotted_order"]+"."));
       }
     }
     assert.doesNotMatch(JSON.stringify(spans), /PRIVATE_/);
@@ -174,7 +179,7 @@ test("actual LangGraph callback trees propagate metadata and remain isolated dur
 });
 
 test("unsampled execution installs no callback exporter; callback limits and cancellation cleanup are bounded", async () => {
-  const disabled = new PhoenixExecutionTracer({ enabled: true, sampleRate: 0 });
+  const disabled = new TestExecutionTracer({ enabled: true, sampleRate: 0 });
   try {
     await disabled.span("test_root", "chain", {}, async () =>
       assert.equal(frameworkTracing().callbacks.length, 0),
@@ -183,9 +188,9 @@ test("unsampled execution installs no callback exporter; callback limits and can
     await disabled.close();
   }
   const spans = [],
-    tracer = new PhoenixExecutionTracer(
+    tracer = new TestExecutionTracer(
       { enabled: true, project: "bounded-framework-test", queueLimit: 2000 },
-      collectPhoenixSpans(spans),
+      collectOtlpSpans(spans),
     );
   try {
     await tracer.span("test_root", "chain", {}, async () => {

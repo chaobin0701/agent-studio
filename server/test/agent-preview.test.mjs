@@ -1,3 +1,4 @@
+import { TestExecutionTracer } from "./helpers/trace-collector.mjs";
 import "reflect-metadata";
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -6,7 +7,6 @@ import { nativeChat } from "./helpers/native-chat.mjs";
 import { AgentPreviewService } from "../dist/executions/agent-preview.service.js";
 import { AgentRunService } from "../dist/executions/agent-run.service.js";
 import { agentMemoryScope } from "../dist/agent-management/runtime-scope.js";
-import { PhoenixExecutionTracer } from "../dist/observability/execution-tracer.js";
 import { executionContextView } from "../dist/observability/execution-view.js";
 
 function fixture(permissions = ["agent_config.manage", "agent_tools.execute"]) {
@@ -76,7 +76,7 @@ function fixture(permissions = ["agent_config.manage", "agent_tools.execute"]) {
     management,
     native.execution,
     access,
-    new PhoenixExecutionTracer({ enabled: false }),
+    new TestExecutionTracer({ enabled: false }),
   );
   const preview = new AgentPreviewService(db, management, access, runs);
   const body = {

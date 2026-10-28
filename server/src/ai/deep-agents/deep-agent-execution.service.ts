@@ -791,7 +791,7 @@ export class DeepAgentExecutionService {
             "chain",
             versions(composition, entry, context),
             async (span) => {
-              snapshot.phoenix = this.tracing!.link(span);
+              snapshot.externalTrace = this.tracing!.link(span);
               return execute();
             },
           )

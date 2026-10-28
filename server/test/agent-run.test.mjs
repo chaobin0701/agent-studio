@@ -1,5 +1,6 @@
+import { TestExecutionTracer } from "./helpers/trace-collector.mjs";
 import "reflect-metadata";
-import { collectPhoenixSpans } from "./helpers/phoenix-collector.mjs";
+import { collectOtlpSpans } from "./helpers/trace-collector.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
@@ -57,7 +58,6 @@ import { RequestContextMiddleware } from "../dist/security/request-context.middl
 import { HttpExceptionFilter } from "../dist/security/http-exception.filter.js";
 import { OriginCheckGuard } from "../dist/security/origin-check.guard.js";
 import { ExecutionTracingService } from "../dist/observability/tracing.module.js";
-import { PhoenixExecutionTracer } from "../dist/observability/execution-tracer.js";
 import { runtimeScope } from "../dist/agent-management/runtime-scope.js";
 import { inWorkspace } from "../dist/workspaces/workspace-context.js";
 
@@ -207,9 +207,9 @@ test(
         root = new pg.Pool({ connectionString: process.env.TEST_DATABASE_URL });
       let db, app;
       const exported = [];
-      const tracer = new PhoenixExecutionTracer(
+      const tracer = new TestExecutionTracer(
         { enabled: true, project: "run-api-acceptance" },
-        collectPhoenixSpans(exported),
+        collectOtlpSpans(exported),
       );
       try {
         await root.query(`CREATE SCHEMA ${schema}`);

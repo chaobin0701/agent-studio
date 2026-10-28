@@ -2,9 +2,9 @@
 const root = require("node:path").resolve(__dirname, "../..");
 if (process.env.AGENT_ACCEPTANCE_ENV_FILE)
   process.loadEnvFile(process.env.AGENT_ACCEPTANCE_ENV_FILE);
-// Explicit local-only trace acceptance; never implicitly export model bodies.
-process.env.PHOENIX_TRACING =
-  process.env.AGENT_ACCEPTANCE_PHOENIX === "true" ? "true" : "false";
+// Explicit metadata-only trace acceptance; never implicitly export model bodies.
+process.env.AGENT_STUDIO_LANGSMITH_ENABLED =
+  process.env.AGENT_ACCEPTANCE_LANGSMITH === "true" ? "true" : "false";
 require(root + "/server/node_modules/reflect-metadata");
 const assert = require("node:assert/strict");
 const { randomUUID } = require("node:crypto");
@@ -41,7 +41,7 @@ const { inWorkspace } = load("workspaces/workspace-context");
   const config = new AppConfigService(),
     db = new DatabaseService(config);
   const tracing =
-    process.env.AGENT_ACCEPTANCE_PHOENIX === "true"
+    process.env.AGENT_ACCEPTANCE_LANGSMITH === "true"
       ? new ExecutionTracingService(config)
       : undefined;
   try {
@@ -228,24 +228,9 @@ const { inWorkspace } = load("workspaces/workspace-context");
         if (tracing) {
           assert.equal(await tracing.flush(), true);
           assert.equal(tracing.metrics.failed, 0);
-          const link = result.contextSnapshot.phoenix;
+          const link = result.contextSnapshot.externalTrace;
           assert.equal(link.enabled, true);
-          const base = config.tracing.endpoint
-            .replace(/\/v1\/traces\/?$/, "")
-            .replace(/\/$/, "");
-          const url = `${base}/v1/projects/${encodeURIComponent(config.tracing.project)}/spans?limit=1000&trace_id=${link.traceId}`;
-          let rows = [];
-          for (let attempt = 0; attempt < 20; attempt++) {
-            const response = await fetch(url, {
-              signal: AbortSignal.timeout(3000),
-              headers: config.tracing.apiKey
-                ? { Authorization: `Bearer ${config.tracing.apiKey}` }
-                : {},
-            });
-            if (response.ok) rows = (await response.json()).data;
-            if (rows.some((row) => row.name === "deep_agent")) break;
-            await new Promise((resolve) => setTimeout(resolve, 500));
-          }
+          const rows = await require("./langsmith-readback.cjs").readStoredTrace(config.tracing, result.contextSnapshot.externalTrace, ["deep_agent", "model_attempt"]);
           assert.ok(
             rows.some(
               (row) =>
@@ -286,7 +271,7 @@ const { inWorkspace } = load("workspaces/workspace-context");
             actualToolCalls: result.toolCalls.length,
             totalTokens: result.totalTokens,
             ...(persistedSpans
-              ? { phoenixPersistedSpans: persistedSpans }
+              ? { langsmithPersistedSpans: persistedSpans }
               : {}),
           }),
         );

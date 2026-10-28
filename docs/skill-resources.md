@@ -1,5 +1,7 @@
 # Skill 辅助资料：管理、版本与只读运行
 
+> 2026-10-28：当前追踪出口已迁移到 LangSmith，配置与验收入口见 [LangSmith 追踪](langsmith-tracing.md)。本文中的 Phoenix 入库数量和命令属于历史验收记录，不代表当前配置。
+
 ## 已实现范围
 
 在独立 Deep Agents 重构 worktree 内，Skill 可维护 `SKILL.md` 和辅助文本文件。正文、资料一起保存到现有资源版本 JSON，复用草稿修订号、验证、不可变发布、历史分支、工作区 RLS、生命周期和审计；没有新增数据库迁移，不改写历史版本。

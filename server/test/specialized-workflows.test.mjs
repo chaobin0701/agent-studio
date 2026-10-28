@@ -1,3 +1,4 @@
+import { TestExecutionTracer } from "./helpers/trace-collector.mjs";
 import "reflect-metadata";
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -20,9 +21,8 @@ import {
   ProviderUnavailableError,
 } from "../dist/ai/providers/provider-errors.js";
 import { withModelCallAccounting } from "../dist/chat/model-call-accounting.js";
-import { PhoenixExecutionTracer } from "../dist/observability/execution-tracer.js";
 import { executionContextView } from "../dist/observability/execution-view.js";
-import { collectPhoenixSpans } from "./helpers/phoenix-collector.mjs";
+import { collectOtlpSpans } from "./helpers/trace-collector.mjs";
 import { makeManagedTool } from "../dist/agent-management/managed-tool.js";
 import { toolSchema } from "../dist/agent-management/resource.types.js";
 
@@ -185,11 +185,11 @@ test("pure administrative Tool tests execute the same real graph with zero-effec
   assert.equal(currentWorkflowHost(), undefined);
 });
 
-test("fixed graph model and tool effects share native usage, original IDs, accounting and private Phoenix parents without input/state export", async () => {
+test("fixed graph model and tool effects share native usage, original IDs, accounting and private LangSmith parents without input/state export", async () => {
   const spans = [],
-    tracer = new PhoenixExecutionTracer(
+    tracer = new TestExecutionTracer(
       { enabled: true, project: "workflow-acceptance" },
-      collectPhoenixSpans(spans),
+      collectOtlpSpans(spans),
     );
   let lookups = 0,
     leases = 0,
