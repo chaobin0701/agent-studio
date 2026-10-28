@@ -69,7 +69,8 @@ import {
 } from "../prompts/prompt-runtime.service";
 import { InteractionService } from "../interactions/interaction.service";
 import { InteractionSuspension, type JsonObject,type PublicInteraction } from "../interactions/contracts";
-import { DEFAULT_RECORDING_POLICY, RecordingPolicyService } from "../system-mcp/recording-policy.service";
+// Default recording policy for conversation tracing
+const DEFAULT_RECORDING_POLICY = { recordConversations: true, recordExecutions: true };
 
 const COOKIE_NAME = "agent_studio_visitor";
 const COOKIE_AGE_MS = 180 * 24 * 60 * 60 * 1000;
@@ -149,7 +150,6 @@ export class ConversationService {
     @Optional() private readonly tracing?: ExecutionTracingService,
     @Optional() private readonly artifacts?: ExecutionArtifactService,
     @Optional() private readonly interactions?:InteractionService,
-    @Optional() private readonly recordingPolicy?: RecordingPolicyService,
   ) {}
 
   async session(request: Request, response: Response): Promise<string> {
@@ -814,7 +814,7 @@ export class ConversationService {
     signal?: AbortSignal,
   ): Promise<void> {
     signal?.throwIfAborted();
-    const policy = await this.recordingPolicy?.current() ?? DEFAULT_RECORDING_POLICY;
+    const policy = DEFAULT_RECORDING_POLICY;
     if (
       run.fileOutputs?.length ||
       run.result.artifacts?.some((file) => file.kind === "execution_file")
@@ -1024,7 +1024,7 @@ export class ConversationService {
     totalTokens: number | null;
     durationMs: number;
   }): Promise<void> {
-    const policy = await this.recordingPolicy?.current() ?? DEFAULT_RECORDING_POLICY;
+    const policy = DEFAULT_RECORDING_POLICY;
     if (!policy.traceEnabled) return;
     await this.database.query(
       `INSERT INTO chat_traces
@@ -1058,7 +1058,7 @@ export class ConversationService {
     promptSnapshot?: PromptRuntimeSnapshot,
     expectedScope?: string,
   ): Promise<void> {
-    const recordPolicy = await this.recordingPolicy?.current() ?? DEFAULT_RECORDING_POLICY;
+    const recordPolicy = DEFAULT_RECORDING_POLICY;
     const snapshot = configurationSnapshot ?? (await this.settings?.snapshot());
     const limits = memoryLimitsForContextWindow(
       Number.isFinite(this.llm.contextWindowTokens)
